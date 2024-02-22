@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Created on Thu Nov  2 11:41:17 2023
+Created on Thu Nov 2 11:41:17 2023
 
-@author: enls0001
+@author: Linus Engstam
 """
 
 import numpy as np
@@ -10,7 +10,6 @@ import pandas as pd
 import math
 import P2G.parameters as params
 import P2G.components as comps
-# import P2G.byproducts as byprods
 import P2G.other as other
 import P2G.kpis as kpis
 import P2G.dispatch as dispatch
@@ -24,21 +23,12 @@ import urllib, json
 import seaborn as sns
 
 
-"""Comments on current version"""
-#What to do with condenser? Should it be included?
+"""
+Comments on current version
 
-#About electrolyzer model:   
-    #Heat production slightly off in MILP compared manually calculated value. Probably an efficiency issue, could try to determine eff. in MILP?
-    #To account for this, heat prodution should be taken from the MILP directly.
+
+"""
     
-#About MILP
-    #A few hours of almost zero electrolyzer operation despite defining a minimum load? Worse when forcing H2 demand.
-    #How to consider electrolyzer start-up?
-    #Test heat in MILP by actually calculating the cost as per the MILP for an hour/day both with and without heat value
-        #For example: during hours 2359-2360 the heat demand is low, but we're producing less heat when accounting for its value?
-    #Have added electrolyzer start-up time in MILP, but may need some testing (not active now).
-
-#Started a RES scenario, but not working yet. Would want across day storage for example.
 
 """MAIN P2G MODEL"""
 
@@ -58,6 +48,8 @@ bat_size_vector = [0] #hours
 """ Simulation parameters """
 
 #CHECK EFFICIENCY CURVE
+#COULD SORT DATA USING CLASS OR DICTIONARY LIKE STRUCT IN MATLAB?
+
 
 year = 2021 #not adapted to 8784 hours?
 bidding_zone = "SE3"
