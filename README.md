@@ -7,7 +7,7 @@ The study is based on a model of a so-called integrated power-to-gas system whic
 
 The following changes are to be made to the project from its previous condition:
 - Improve documentation to a consistent standard similar to numpydoc
-- Further modularization of the simulation script to improve readability
+- Further modularization of the simulation script and implement classes for variable saving to improve readability
 - Performance improvements through increased NumPy use and optimization of for loops
 - Removal of unused segments
 
