@@ -4035,7 +4035,7 @@ def p2g_wwtp3(
     
     
     # objective (minimize the electricity cost)
-    prob += plp.lpSum([grid_el[i] * grid[i] for i in range(len(grid))]) + plp.lpSum([wind_el[i] * wind_cost for i in range(len(grid))]) + plp.lpSum([pv_el[i] * pv_cost for i in range(len(grid))]) + \
+    prob += plp.lpSum([grid_el[i] * grid[i] / 1000 for i in range(len(grid))]) + plp.lpSum([wind_el[i] * wind_cost for i in range(len(grid))]) + plp.lpSum([pv_el[i] * pv_cost for i in range(len(grid))]) + \
         ((plp.lpSum([h2_demand[i] - h2_use[i] for i in range(len(grid))]))*10000000) + (plp.lpSum([elz_start[i] * elz_startup_time*elz_max*grid[i] for i in range(len(grid))])) - \
             plp.lpSum([o2_use[i] * (o2_power * grid[i] / 1000) for i in range(len(grid))]) - plp.lpSum([heat_income[i] for i in range(len(grid))])# + \
     #electricity costs (grid, wind, pv)

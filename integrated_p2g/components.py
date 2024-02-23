@@ -119,7 +119,6 @@ def electrolyzer(
     # stack_efficiency = prod * 39.4 / dispatch #HHV
     # sys_efficiency = prod * 39.4 / (dispatch + aux) #HHV
     dispatch = np.round(dispatch,5)
-    
     stack_efficiency = np.divide(prod * 39.4, dispatch - aux, out=np.zeros_like(dispatch)+1, where=(dispatch-aux)!=0)
     sys_efficiency = np.divide(prod * 39.4, dispatch, out=np.zeros_like(dispatch), where=dispatch!=0)
     
