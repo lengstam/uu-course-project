@@ -103,18 +103,6 @@ def msp(
     return msp
     
     
-def efs(
-    bz,
-    yr,
-) -> pd.DataFrame:
-    """ Returns AEFs and MEFs for chosen bidding zone and year """
-    
-    efs_read = r'C:\Users\enls0001\Anaconda3\Lib\site-packages\P2G\Data\EFs\efs_' + str(bz) + '_' + str(yr) + '.xlsx'
-    efs = pd.read_excel(efs_read)
-    # efs = pd.DataFrame(np.zeros((8760,2)) + 1000)
-    
-    return efs
-    
     
     
     

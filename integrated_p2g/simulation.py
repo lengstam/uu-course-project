@@ -21,291 +21,69 @@ import matplotlib.lines as lines
 import plotly.graph_objects as go
 import urllib, json
 import seaborn as sns
+import time
 
 """
-Comments on current version
+Integrated power-to-gas model
+
+"""
 
 
 """
-    
+Comments on current version (1.0a):
 
-# Save KPIs in a dictionary?
+REDO SIMULATIONS
+    MAY HAVE DOUBLE-COUNTED CURTATAILED PV ABOVE 2X CAPACITY (PURE PV), TRY AND REDO
+    HAVE USED THE SAME 24 HOURS FOR COMPRESSION CONSUMPTION
+    HAVE USED A TOO HIGH VALUE FOR SPOT PRICE FROM GRID IN DISPATCH
+"""
 
-"""MAIN P2G MODEL"""
-
-#MAY HAVE DOUBLE-COUNTED CURTATAILED PV ABOVE 2X CAPACITY (PURE PV), TRY AND REDO
-
-# HAVE USED THE SAME 24 HOURS FOR COMPRESSION CONSUMPTION
-
-# HAVE USED A TOO HIGH VALUE FOR SPOT PRICE FROM GRID IN DISPATCH
+# start = time.time()
 
 """ Optimization parameters """
-# res_scale = 
-elz_size_vector = [8.5]#[6,6.5,7,7.5,8,8.5,9,9.5,10,10.5,11,11.5,12] #MW
-meth_scale_vector = [5]#[3.5,4,4.5,5] #MWout #[0.6,0.65,0.7,0.75,0.8,0.85,0.9,0.95,1.0,1.05,1.1,1.15,1.2] #ratio to elz
-h2st_size_vector = [400]#[0,100,200,300,400,500,600,700,800,900,1000] #kg #[0,1,2,3,4,5] #hours
-wind_size_vector = [1.25] #ratio
-pv_size_vector = [1.25] #ratio
-bat_size_vector = [0] #hours
-
-#OPTIMIZING FOR CURTAILMENT COST NOW
+elz_size_vector = [8.5]#[6,6.5,7,7.5,8,8.5,9,9.5,10,10.5,11,11.5,12] # [MW]
+meth_scale_vector = [5]#[3.5,4,4.5,5] # [MWCH4]
+h2st_size_vector = [400]#[0,100,200,300,400,500,600,700,800,900,1000] # [kg]
+wind_size_vector = [1.25] # [ratio to elz]
+pv_size_vector = [1.25] # [ratio to elz]
+bat_size_vector = [0] # [MWh]
 
 """ Simulation parameters """
+year = 2021 # 2018-2021 available
+bidding_zone = 'SE3' # ['SE1', 'SE2', 'SE3', 'SE4']
+simulation_details = 'Yes' # ['Yes', 'No'] A "Process" dataframe with all process stages during all hours is created.
 
-#CHECK EFFICIENCY CURVE
-#COULD SORT DATA USING CLASS OR DICTIONARY LIKE STRUCT IN MATLAB?
+""" Creating component classes for variable storage in un-optimized components """
+tec = params.TechnoEconomics(hv='hhv') # Techno-economic parameters
+storage = params.Storage(h2_size=0, bat_size=0, o2_size=0, heat_size=0) # Storages (hydrogen, battery, oxygen, heat). Setting arbitrary sizes to be adjusted later within the optimization loop.
+biogas = params.Biogas(data='real', year=year) # Biogas production
+res = params.Renewables(wind_size=3000, pv_size=3000, year=year, lifetime=tec.lifetime) # Renewables (wind, PV). Assuming arbitrary sizes to be adjusted later within the optimization loop.
+grid = params.Grid(year=year, zone=bidding_zone) # Electricity grid parameters
+o2 = params.Oxygen(year=year) # Oxygen utilization system
+heat = params.Heat(year=year) # Heat utilization system
 
-
-year = 2021 #not adapted to 8784 hours?
-bidding_zone = "SE3"
-by_use = "WWTP"
-ef_type = "aef" #aef/mef/fix
-scenario = "grid" #grid/res
-alpha = 0
-pwl_points = 10 #number of points for linearization of efficiencies
-excess_res_frac = 0.5 #the fraction of installed local RES capacity above which there was assumed to be an excess of renewable electricity
-
-# Technical parameters
-#Biogas plant
-biogas_pres = 1 #bar
-biogas_temp = 50 #C
-
-# Electrolyzer
-# elz_size = 8 #MW
-# elz_n_system = 0.75 #HHV system efficiency at full load (part-load is estimated)
-# # elz_aux = 0.05 #auxiliary component consumption as share of rated power (van der Roest, check other sources). Assuming constant.
-# elz_n_stack = elz_n_system + 0.05 #HHV stack efficiency at full load
-# # elz_min = 0 #minimum load (now defined further down based on auxiliary consumption)
-# elz_start = 5 #minutes (cold start)
-# elz_start_cost = elz_start/60 #0 #startup cost [fraction of rated power]
-# elz_standby_cost = 0.02 #standby cost [fraction of rated power]
-# # elz_cooldown = 6 #hours
-# elz_heatup_time = 60 #[minutes] the time during which no usable waste heat is released (look into in more detail)
-# elz_temp = 80 #C
-# elz_h2o_temp = 15 #[C] inlet water temperature
-# elz_pres = 30 #bar
-# elz_degr = 1 #[% per year/1000 FLHs depending on stack replacement time below] from Ginsberg, strengthened by van der Roest and within ranges of Buttler
-# stack_rep = 10 #hours if > 1000, years if < 100. If year, define if it is replaced after ten years or at the start of year ten? After ten years now.
-# degr_year = round(stack_rep/2) #which year of operation to consider for efficiency degradation (assuming 0 as year 1)
-# elz_water_cons = 10 #[l/kgH2]
-# h2_hv = 39.4 #kWh/kgH2
-
-#H2 storage
-# h2st_size = 4 #hours
-# h2st_n = 1 #Hydrogen storage round-trip efficiency (not implemented yet)
-
-#Methanation (should it be sized?)
-# meth_size = elz_size * 0.85 #[MW] could just define scale compared to "expected" from electrolyzer here, and define real size in "parameters"
-# meth_scale = 1 #scale copared to electrolyzer pairing
-# meth_temp = 65 #C
-# meth_pres = 10 #bar
-# meth_start = 0 #minutes (cold start) NEED TO IMPLEMENT THIS ALSO OUTSIDE THE MILP
-# meth_min = 0 #minimum load
-# # meth_cooldown = 6 #what to define here?
-# meth_n = 0.99 #CO2 conversion efficiency
-# microb_cons = 0#0.06 #fraction of extra CO2 required for microbial growth
-# meth_standby_energy = 0#0.01 #fraction of rated electricity input required for stand-by
-# meth_el_cons = 0.5 #[kWh/Nm3 CH4 produced] In Schlautmann et al. 2020 for example.
-
-#Membrane (should be simple, just an output purity or similar?)
-
-#Heat storage (Not implemented)
-# heatst_size = 0 #unit? hours?
-
-#Oxygen storage (Not implemented)
-# o2st_size = 0 #hours
-
-#Battery storage (Not implemented)
-bat_size = 0 #hours of full electrolyzer electricity input capacity
-bat_eff = 0.95 #round trip efficiency of battery
-
-#Electricity
-# wind_size = 0 #MW
-# pv_size = 0 #MW
-wind_efs = 15 #[kgCO2/MWh]
-pv_efs = 70 #[kgCO2/MWh]
-pv_degr = 0.5 #[%/y]
-#Grid emissions for electrolyzer dispatch optimization
-# if ef_type == "aef":
-#     efs_read = r'C:\Users\enls0001\Anaconda3\Lib\site-packages\P2G\Data\EFs\efs_' + str(bidding_zone) + '_' + str(year) + '.xlsx'
-#     efs = pd.read_excel(efs_read)
-#     efs = efs.iloc[:,0]
-# elif ef_type == "mef":
-#     efs_read = r'C:\Users\enls0001\Anaconda3\Lib\site-packages\P2G\Data\EFs\efs_' + str(bidding_zone) + '_' + str(year) + '.xlsx'
-#     efs = pd.read_excel(efs_read)
-#     efs = efs.iloc[:,1]
-    
-#Other
-usable_heat = 0.8 #heat exchanger efficiency (van der Roest et al. 2023)
-# comp_n = 0.75 #compressor isentropic efficiency (use 0.75 % instead?)
-# n_motor = 0.95 #electrical motor efficiency
-# cond_n = 0.8 #condenser efficiency (how much heat can be utilized) But probably too low temperature?
-
-#By-products
-#Do at parameter stage. What needs to be defined here?
-#What about emission reduction from heat use? Both internal and DH?
-dh_emissions = 112 #[gCO2/kWh]
-dh_emissions_marginal = 30 #[gCO2/kWh]
-# pellet_emissions = 100 #[gCO2/kWh] find more accurate value!
-#Aerators
-o2_replacement_factor = 100/21 #how much can we reduce the aeration flow by?
-sote_increase = 1 #reduced o2 demand due to higher driving force, need to implement properly for costs if used as we're still replacing the same amount of air!
-aerator_air = 1/17 #[kWh/kgO2]
-aerator_o2 = aerator_air/(o2_replacement_factor) #[kWh/kgO2]
-#Donald & Love
-# aerator_air = 1.38 / 0.21 #[kWh/kgO2]
-# aerator_o2 = 1.38
-aerator_savings = (aerator_air - aerator_o2) * sote_increase #[kWh/kgO2] energy savings per kg pure O2
-# aerator_savings_mol = aerator_savings / (1000 / 32) #[kWh/mol] energy savings per mol pure O2
-#Heat
-heat_scale = 1
-# digester_heat = 300 #[kW] (could assume 10 % of biogas energy content as in Michailos et al.)
-# heat_frac_use = 1
-
-#Gas parameters (which are used in the end?)
-ch4_hhv_vol = 11.05 #kWh/Nm3
-# ch4_lhv_vol = 9.94 #kWh/Nm3
-ch4_hhv_kg = 15.44 #kWh/kg
-# ch4_lhv_kg = 13.9 #kWh/kg
-ch4_hhv_mol = ch4_hhv_kg / (1000/16.04) #kWh/mol
-# ch4_lhv_mol = ch4_lhv_kg / (1000/16.04) #kWh/mol
-nm3_mol = ch4_hhv_mol / ch4_hhv_vol #Nm3/mol
-# h2_hhv_vol = 3.53 #kWh/Nm3
-# h2_lhv_vol = 3 #kWh/Nm3
-h2_hhv_kg = 39.4 #kWh/kg
-# h2_lhv_kg = 33.3 #kWh/kg
-h2_hhv_mol = h2_hhv_kg / (1000/2.02) #kWh/mol
-# h2_lhv_mol = h2_lhv_kg / (1000/2.02) #kWh/mol
-
-# Economical parameters
-#General
-lifetime = 20 #years
-discount = 8 #[%]
-co2_cost = 0 #[€/tonCO2]
-
-#Biogas plant (should it be included?)
-# biogas_capex = 1000 #[€/kW CH4]
-# biogas_opex = 10 #[% of CAPEX]
-biogas_lcoe = 65 #[€/MWh raw biogas]
-biogas_ef = 50 #[gCO2/kWh]
-
-#Electrolyzer
-# elz_capex = 1500 #[€/kW] at 5 MW
-# elz_capex_ref = 5 #[MW]
-# elz_opex = 4 #% of CAPEX
-# elz_scaling = 0.75 #scaling factor for CAPEX
-# water_cost = 0.5 #€/m3 (including purification) Se förstudie för värde
-# stack_cost = 0.5 #fraction of CAPEX
-
-#H2 storage
-# h2st_capex = 500 #€/kgH2 (is this CAPEX true for low-pressure storage?)
-# h2st_opex = 1.5 #% of CAPEX
-# h2st_pres = 30 #bar (if it requires high pressure we want to avoid storage when not needed?)
-
-#Methanation
-# meth_capex = 900 #[€/kWCH4] assumed at 5 MW
-# meth_capex_ref = 5 #[MW]
-# meth_opex = 8 #% of CAPEX
-# meth_scaling = 0.65 #scaling factor for CAPEX
-
-#Installation cost
-install_cost = 20 #[% of total CAPEX]
-
-#Membrane (included in methanation?)
-# mem_capex = 0
-# mem_opex = 0 #% of CAPEX
-
-#Heat storage
-# heatst_capex = 0
-# heatst_opex = 0 #% of CAPEX
-
-#Oxygen storage
-# o2st_capex = 0
-# o2st_opex = 0 #% of CAPEX
-
-#Battery storage
-bat_capex = 300 #[€/kWh]
-bat_opex = 2 #% of CAPEX
-
-#Electricity
-# wind_capex = 1000 #€/kW
-# wind_opex = 3 #% of capex
-wind_lcoe = 40 #[€/MWh] assumed PPA price
-# pv_capex = 1000 #€/kW
-# pv_opex = 1 #% of CAPEX
-pv_lcoe = 45 #€/MWh
-grid_fee = 10 #€/MWh (only PV on-site?)
-# res_cost = 40
-# res_cost_milp = 0
-
-#Other components
-# bg_clean_capex = 0 #(desulfurification and drying)
-# comp_capex = 0
-# comp_opex = 5 #% of CAPEX (Khan et al.)
-# hex_capex = 0
-# hex_opex = 0 #% of CAPEX
-# cond_capex = 0 #can probably assume this already exists?
-# cond_opex = 0
-
-#By-products
-#Internal heat from pellets: 4.3 kWh heat/kg, efficiency of 90 %, 200 €/ton --> 4.3*0.9*1000 / 200 = 19.35 € ~ 20 €/MWh
-# pellet_cost = 100 #[€/MWh]
-#DH pricing (converted SEK to EUR)
-# dh_price = 50 #[€/MWh]
-# dh_fix = 89 #[€/kW and year] only applies if we completely replace DH
-dh_winter = 53 #[€/MWh] minus for annual usage discount
-dh_spr_aut = 35 #[€/MWh]
-dh_summer = 22 #[€/MWh]
-
-# o2_price = 80 #[€/ton]
-# gas_price = 180 #[€/MWh] LHV or HHV?
-#Ozone?
-#CAPEX/OPEX
-heat_integration_capex = 260 #[€/kWth]
-heat_integration_ref = 400 #[kWth]
-heat_piping_capex = 230 #[€/m]
-# o2_integration_capex = 70+77 #[€/kW electrolyzer] 70 for piping etc, 77 for pure O2 aeration tech.
-# o2_integration_ref = 0
-o2_piping_capex = 540 #[€/m]
-o2_aerator_capex = 70 #[€/kW electrolyzer]
-o2_aerator_ref = 1250 #[MWel]
-# o2_piping_ref = 4.8 #[MWel]
-piping_dist = 1000 #[m]
-heat_integration_opex = 2
-o2_integration_opex = 2 
-heat_integration_scaling = 0.3
-o2_integration_scaling = 0.6
-
-# Hydrogen storage
-h2st = params.Storage()
-
-
-# Biogas plant
-biogas_flow = params.biogas_plant(year=year)
-min_co2 = np.min(np.divide(biogas_flow[:,1], biogas_flow[:,1]+biogas_flow[:,0], out=np.zeros_like(biogas_flow[:,0])+1, where=biogas_flow[:,1]+biogas_flow[:,0]!=0)) #[mol/h] maximum theoretical flow rate to methanation
-
-# Grid electricity
-# Create a message when this file cannot be reached!
-spot_read = r'C:\Users\enls0001\Anaconda3\Lib\site-packages\P2G\Data\elspot prices ' + str(year) + '.xlsx'
-spot_price = pd.read_excel(spot_read) + grid_fee
-spot_price = np.array(spot_price[bidding_zone].tolist())
-
-""" DEFINING OPTIMIZATION """
-
-#Run type
+""" Define run-type """
 if len(elz_size_vector) == 1 and len(meth_scale_vector) == 1 and len(h2st_size_vector) == 1 and len(wind_size_vector) == 1 and len(pv_size_vector) == 1 and len(bat_size_vector) == 1:
-    run_type = "single"
+    run_type = 'single'
+    cost_breakdown = pd.DataFrame({'Costs': ['Electrolyser','Stack','Water','Storage','Meth','Comp','Heat','O2','Installation','Flaring','Grid','PV','Wind','Curtailment','O2 income','Heat income','Total']}).set_index('Costs')
+    
+    if simulation_details == 'Yes' or simulation_details == 'yes':
+        process = other.data_saving(year=year) # Initiate process data saving
+        #Save simulation independent data
+        process['Elspot [€/MWh]'] = grid.spot_price
+        process['Biogas (CH4) [mol/h]'] = biogas.flow[:,0]
+        process['Biogas (CO2) [mol/h]'] = biogas.flow[:,1]
+        process['O2 WWTP [mol/h]'] = o2.demand
+        process['WWTP heat demand [kWh/h]'] = heat.demand_tot
+        
 else:
-    run_type = "optimization"
+    run_type = 'optimization'
     #Counting etc.
     sims = len(elz_size_vector) * len(h2st_size_vector) * len(wind_size_vector) * len(pv_size_vector) * len(meth_scale_vector) * len(bat_size_vector)
     count = 0
+    results = pd.DataFrame({'KPIs': ['LCOP2G (curt)', 'LCOP2G', 'MSP', 'MSP (no curt)', 'LCOE', 'Gas eff.', 'Heat eff.', 'Tot eff.', 'AEF net', 'MEF net', 'Starts', 'Standby', 'FLHs', 'Loss [%]', 'O2 util.', 'O2 dem.', 'Heat util', 'Heat dem.', 'RES [%]', 'LCOP2G BY diff.', 'LCOP2G BY rel.', 'MSP BY diff.', 'MSP BY rel.', 'NPV O2', 'NPV HEAT']}).set_index('KPIs')
 
-#Create results dataframe
-results = pd.DataFrame({'KPIs': ['LCOP2G (curt)', 'LCOP2G', 'MSP', 'MSP (no curt)', 'LCOE', 'Gas eff.', 'Heat eff.', 'Tot eff.', 'AEF net', 'MEF net', 'Starts', 'Standby', 'FLHs', 'Loss [%]', 'O2 util.', 'O2 dem.', 'Heat util', 'Heat dem.', 'RES [%]', 'LCOP2G BY diff.', 'LCOP2G BY rel.', 'MSP BY diff.', 'MSP BY rel.', 'NPV O2', 'NPV HEAT']}).set_index('KPIs')
-cost_breakdown = pd.DataFrame({'Costs': ['Electrolyser','Stack','Water','Storage','Meth','Comp','Heat','O2','Installation','Flaring','Grid','PV','Wind','Curtailment','O2 income','Heat income','Total']}).set_index('Costs')
-
-#Run simulation for all investigated sizes
+""" Run optimization """
 for e in range(len(elz_size_vector)):
     for m in range(len(meth_scale_vector)):
         for s in range(len(h2st_size_vector)):
@@ -313,43 +91,22 @@ for e in range(len(elz_size_vector)):
                 for p in range(len(pv_size_vector)):
                     for b in range(len(bat_size_vector)):
                         
-                        """ DEFINING COMPONENTS """
+                        """ Re-define optimized components """
                         pem = params.Electrolyzer(elz_size_vector[e]) # Create electrolyzer
                         pem.efficiency('No plot') # Create electrolyzer efficiency curve
-                        meth = params.Methanation(meth_scale_vector[m], min_co2) # Create methanation reactor
-                        h2st_cap = h2st_size_vector[s] # Define storage size for this run
+                        meth = params.Methanation(meth_scale_vector[m], biogas.min_co2) # Create methanation reactor
+                        storage.h2_size = h2st_size_vector[s] # Define storage size for this run
+                        storage.bat_size = bat_size_vector[b]
                         wind_size = wind_size_vector[w] * pem.size
                         pv_size = pv_size_vector[p] * pem.size
-                        bat_cap = bat_size_vector[b]
-                        bg_comp = params.Compressor(meth.flow_max/3600, meth.pres, biogas_pres, biogas_temp) # Create biogas compressor
-
-                        #Biogas compressor (using formulas above)
-                        #Capacity
-                        # bg_comp_size, comp_spec_el = params.compressor(flow=meth.flow_max/3600, temp_in=biogas_temp, p_in=biogas_pres, p_out=meth.pres, n_isen=comp_n, n_motor=n_motor)
+                        res.wind_gen *= wind_size / res.wind_size # Update wind generation using new capacity
+                        res.wind_size = wind_size # Update wind size
+                        res.pv_gen *= pv_size / res.pv_size # Update wind generation using new capacity
+                        res.pv_size = pv_size # Update wind size
+                        bg_comp = params.Compressor(meth.flow_max/3600, meth.pres, biogas.pres, biogas.temp) # Create biogas compressor
                         
-                        #RES generation
-                        wind_gen, pv_gen = params.renewables(wind_size=wind_size, pv_size=pv_size, pv_degr=pv_degr, lifetime=lifetime, year=year)
-                        
-                        #Heat exchangers (now assuming an overall cost for heat integration)
-                        # elz_heat_max = elz_params.iloc[len(elz_params)-1,2]
-                        # meth_heat_max = meth_params.iloc[len(meth_params)-1,2]
-
-                        #Condenser (now assuming an overall cost for heat integration)
-                        # meth_h20_max = biogas_flow.iloc[0,1] * 2 #4H2 + CO2 --> CH4 + 2H2O
-                        # h2o_heat_of_cond = 40.8/3600 #kWh/mol
-                        # cond_heat_max = meth_h20_max * h2o_heat_of_cond #what about temperature decrease?
-
-                        #By-products
-                        o2_demand, heat_demand_tot, heat_demand_bg, heat_demand_aux = params.byprod_loads(o2_scale=1/sote_increase, heat_scale=heat_scale, year=year)
-                        # heat_demand_tot = heat_demand_tot*4
-                        
-                        """ PROCESS SIMULATION """
-                        #Initiate process data (should only make a dataframe if it's a single simulation to save time?)
-                        process = other.data_saving(year=year)
-
-                        #Save independent data
-                        # process['Emissions [gCO$_2$/kWh]'] = efs
-                        process['Elspot [€/MWh]'] = spot_price
+                        """ Process simulation """
+                            
                          
                         #Initial values for dynamic variables
                         # T_elz = 20 #assuming ambient temperature
@@ -394,58 +151,33 @@ for e in range(len(elz_size_vector)):
                         h2_prod_start = []
                         h2_prod_real = []
                         
-                        #Daily electrolyzer dispatch on day-ahead market
+                        # Daily electrolyzer dispatch on day-ahead market
                         if year == 2020:
                             hrs = 8784
                         else:
                             hrs = 8760
                         for d in range(int(hrs/24)): #daily basis
-                            #hour values
+                            # Annual hours during specific day
                             i1 = d*24
                             i2 = i1 + 24
                             
-                            h2_demand_hr = ((biogas_flow[i1:i2,1] * 4) * (1-meth.microb_cons))# - (4*gas_recirc[1]) - gas_recirc[0] #4:1 ratio of H2 and CO2 [mol/h] minus recycled CO2 and H2 and microbial consumption
+                            h2_demand_hr = ((biogas.flow[i1:i2,1] * 4) * (1-meth.microb_cons))# - (4*gas_recirc[1]) - gas_recirc[0] #4:1 ratio of H2 and CO2 [mol/h] minus recycled CO2 and H2 and microbial consumption
                             h2_demand_hr = np.minimum(h2_demand_hr,meth.size_vector*4) #Also limited by methanation reactor size
                             h2_demand_hr = np.where(h2_demand_hr<(meth.flow_min*4),0,h2_demand_hr)
                             h2_demand_hr = np.transpose(h2_demand_hr)
                             h2_demand_hr_kg = h2_demand_hr * 2.02 / 1000 #mol to kg
                             
                             #Also, consider if/when we should fill up the storage ahead of the next day?
-                            
-                            #By-product demands
-                            heat_demand_hr = np.array(heat_demand_tot[i1:i2])
-                            o2_demand_hr = np.array(o2_demand[i1:i2])
-                        
-                            
+
                             #Check last hour of previous day
                             if d != 0:
                                 if elz_on == 1 or elz_standby == 1:
                                     prev_mode = 1
                                 else:
                                     prev_mode = 0
-                            #Multi och single objective optimization
-                            # if alpha == 0:
-                                # if scenario == "grid":
-                            elz_dispatch = dispatch.p2g_wwtp3(h2_demand=h2_demand_hr_kg, heat_demand=heat_demand_hr, heat_value=[dh_spr_aut,dh_summer,dh_spr_aut,dh_winter], usable_heat=usable_heat, meth_spec_heat=meth.spec_heat, o2_demand=o2_demand_hr*32/1000, o2_power=aerator_savings, k_values=pem.k_values, m_values=pem.m_values, grid=spot_price[i1:i2], wind=wind_gen, pv=pv_gen, elz_max=pem.size_degr, elz_min=pem.min_load*pem.size_degr, elz_eff=pem.n_sys, aux_cons=pem.aux_cons, meth_max=meth.size_mol*2.02*4/1000, meth_min=meth.min_load*meth.size_mol*4*2.02/1000, h2st_max=h2st_cap, h2st_prev=h2_storage, prev_mode=prev_mode, startup_cost=pem.start_cost, standby_cost=pem.standby_cost, bat_cap=bat_cap, bat_eff=bat_eff, bat_prev=bat_storage, meth_el_factor=meth.spec_el, h2o_cons=pem.water_cons, temp=pem.temp, h2o_temp=pem.h2o_temp, biogas=biogas_flow[i1:i2], comp_el_factor=bg_comp.spec_el, elz_startup_time=pem.start_time/60)# wind_cost=wind_lcoe, pv_cost=pv_lcoe)
-                                # elif scenario == "res":
-                                    # elz_dispatch = dispatch.p2g_wwtp2_res(h2_demand=h2_demand_hr_kg, heat_demand=heat_demand_hr, heat_value=[dh_spr_aut,dh_summer,dh_spr_aut,dh_winter], usable_heat=usable_heat, meth_spec_heat=meth_spec_heat, o2_demand=o2_demand_hr*32/1000, o2_power=aerator_savings, k_values=k_values, m_values=m_values, grid=spot_price[i1:i2], res=res_excess[i1:i2], elz_max=elz_size_degr*1000, elz_min=elz_min*elz_size_degr*1000, elz_eff=elz_n_system, aux_cons=elz_auxiliary, meth_max=meth_size_mol*2.02*4/1000, meth_min=meth_min*meth_size_mol*4*2.02/1000, h2st_max=h2st_cap, h2st_prev=h2_storage, prev_mode=prev_mode, startup_cost=elz_start_cost, standby_cost=elz_standby_cost, bat_cap=bat_cap, bat_eff=bat_eff, bat_prev=bat_storage, meth_el_factor=meth_spec_el, h2o_cons=elz_water_cons, temp=elz_temp, h2o_temp=elz_h2o_temp, biogas=biogas_flow, comp_el_factor=comp_spec_el, elz_startup_time=elz_start/60, res_cost=res_cost_milp)# wind_cost=wind_lcoe, pv_cost=pv_lcoe)
-                            # elif alpha == 1:
-                                # elz_dispatch = 1#dispatch.ems_daily_pl(demand=h2_demand_kg, grid=efs[i1:i2], wind=res_gen.iloc[i1:i2,0], pv=res_gen.iloc[i1:i2,1], elz_max=elz_size_degr*1000, elz_min=elz_min*elz_size_degr*1000, params=elz_params, h2st_max=h2st_cap, h2st_prev=h2_storage, h2_hv=h2_hv, wind_ef=0, pv_ef=0)#wind_ef=wind_efs, pv_ef=pv_efs)
-                            # elif alpha > 0 and alpha < 1:
-                                #To determine the nadir and utopian values for cost and emissions, for normalization of multi-objective function
-                                # elz_dispatch1, cost_utp, ems_nad = 1#dispatch.multi_daily_pl(demand=h2_demand_kg, grid=spot_price[i1:i2], wind=res_gen.iloc[i1:i2,0], pv=res_gen.iloc[i1:i2,1], elz_max=elz_size_degr*1000, elz_min=elz_min*elz_size_degr*1000, params=elz_params, h2st_max=h2st_cap, h2st_prev=h2_storage, h2_hv=h2_hv, alpha=0, efs=efs[i1:i2], wind_ef=0, pv_ef=0, wind_cost=0, pv_cost=0)#wind_ef=wind_efs, pv_ef=pv_efs, wind_cost=wind_lcoe+grid_fee, pv_cost=pv_lcoe+grid_fee)
-                                # elz_dispatch2, ems_utp, cost_nad = 1#dispatch.multi_daily_pl(demand=h2_demand_kg, grid=spot_price[i1:i2], wind=res_gen.iloc[i1:i2,0], pv=res_gen.iloc[i1:i2,1], elz_max=elz_size_degr*1000, elz_min=elz_min*elz_size_degr*1000, params=elz_params, h2st_max=h2st_cap, h2st_prev=h2_storage, h2_hv=h2_hv, alpha=1, efs=efs[i1:i2], wind_ef=0, pv_ef=0, wind_cost=0, pv_cost=0)#wind_ef=wind_efs, pv_ef=pv_efs, efs=efs[i1:i2], wind_cost=wind_lcoe+grid_fee, pv_cost=pv_lcoe+grid_fee)                
-                                # C_NAD.append(cost_nad)
-                                # C_UTP.append(cost_utp)
-                                # E_NAD.append(ems_nad)
-                                # E_UTP.append(ems_utp)
-                                #Using nadir and utopian values to perform multi-objective optimization of electrolyzer dispatch
-                                # if abs(cost_utp-cost_nad) < 1 or abs(ems_utp-ems_nad) < 1:
-                                    # test.append(1)
-                                    # elz_dispatch = elz_dispatch1
-                                # else:
-                                    # elz_dispatch, __, __ = 1#dispatch.multi_daily_pl(demand=h2_demand_kg, grid=spot_price[i1:i2], wind=res_gen.iloc[i1:i2,0], pv=res_gen.iloc[i1:i2,1], elz_max=elz_size_degr*1000, elz_min=elz_min*elz_size_degr*1000, params=elz_params, h2st_max=h2st_cap, h2st_prev=h2_storage, h2_hv=h2_hv, alpha=alpha, cost_norm=abs(cost_nad-cost_utp), ems_norm=abs(ems_nad-ems_utp), ems_utp=ems_utp, cost_utp=cost_utp, efs=efs[i1:i2], wind_ef=0, pv_ef=0, wind_cost=0, pv_cost=0)#wind_ef=wind_efs, pv_ef=pv_efs, efs=efs[i1:i2], wind_cost=wind_lcoe+grid_fee, pv_cost=pv_lcoe+grid_fee)
-                                    # test.append(0)
+                            
+                            # Daily dispatch optimization
+                            elz_dispatch = dispatch.p2g_wwtp3(h2_demand=h2_demand_hr_kg, heat_demand=heat.demand_tot[i1:i2], heat_value=heat.dh_price, usable_heat=heat.usable, meth_spec_heat=meth.spec_heat, o2_demand=o2.demand[i1:i2]*32/1000, o2_power=o2.aerator_savings, k_values=pem.k_values, m_values=pem.m_values, grid=grid.spot_price[i1:i2], wind=res.wind_gen, pv=res.pv_gen, elz_max=pem.size_degr, elz_min=pem.min_load*pem.size_degr, elz_eff=pem.n_sys, aux_cons=pem.aux_cons, meth_max=meth.size_mol*2.02*4/1000, meth_min=meth.min_load*meth.size_mol*4*2.02/1000, h2st_max=storage.h2_size, h2st_prev=h2_storage, prev_mode=prev_mode, startup_cost=pem.start_cost, standby_cost=pem.standby_cost, bat_cap=storage.bat_size, bat_eff=storage.bat_eff, bat_prev=bat_storage, meth_el_factor=meth.spec_el, h2o_cons=pem.water_cons, temp=pem.temp, h2o_temp=pem.h2o_temp, biogas=biogas.flow[i1:i2], comp_el_factor=bg_comp.spec_el, elz_startup_time=pem.start_time/60)# wind_cost=wind_lcoe, pv_cost=pv_lcoe)
                                    
                             #Save daily data
                             H2_demand.extend(h2_demand_hr)
@@ -512,447 +244,288 @@ for e in range(len(elz_size_vector)):
                         #Flow definitions
                         
                         co2_flow = h2_meth / ((1-meth.microb_cons)*4)
-                        p2g_frac = np.divide(co2_flow, biogas_flow[:,1].T, out=np.zeros_like((co2_flow)), where=biogas_flow[:,1]!=0)
-                        biogas_in = biogas_flow.T * p2g_frac
-                        bg_flow = biogas_in.sum(axis=0)
-                        flared_gas = biogas_flow.T * abs(np.around((1-p2g_frac),6))
+                        p2g_frac = np.divide(co2_flow, biogas.flow[:,1].T, out=np.zeros_like((co2_flow)), where=biogas.flow[:,1]!=0)
+                        biogas_in = biogas.flow.T * p2g_frac
+                        flared_gas = biogas.flow.T * abs(np.around((1-p2g_frac),6))
                         if year == 2020:
                             flared_gas = [np.zeros(8784,), flared_gas[1], flared_gas[0]] #[H2, CO2, CH4]
                         else:
                             flared_gas = [np.zeros(8760,), flared_gas[1], flared_gas[0]] #[H2, CO2, CH4]
                         
-                        #Biogas compression (flow rate in; compressor power and temp. out(?))
-                        bg_comp_power, T_bg_comp = comps.compressor(flow=bg_flow, temp_in=biogas_temp, p_in=biogas_pres, p_out=meth.pres, n_isen=bg_comp.n_isen, n_motor=bg_comp.n_motor, year=year) #[kWh]
+                        # Biogas compression (flow rate in; compressor power and temp. out(?))
+                        bg_comp_power, T_bg_comp = comps.compressor(flow=biogas_in.sum(axis=0), temp_in=biogas.temp, p_in=biogas.pres, p_out=meth.pres, n_isen=bg_comp.n_isen, n_motor=bg_comp.n_motor, year=year) #[kWh]
 
-                        #Gas mixing (Biogas, hydrogen, temp in; temp out?)
-                        co2_in = biogas_in[1]#biogas_flow.iloc[hour,1]# + gas_recirc[1]
-                        h2_in = h2_meth# + gas_recirc[0]
-                        ch4_in = biogas_in[0]#biogas_flow.iloc[hour,0]# + gas_recirc[2]
-                        inlet_flow, T_inlet = comps.mixer(h2=h2_in, co2=co2_in, ch4=ch4_in, h2_temp=pem.temp, bg_temp=biogas_temp)
-
-                        #Pre-heating (temp in and out in, molar flow in (specific heat); energy (heat) consumption out) (is this needed for biological?)
-                        # pre_heating = comps.preheater(flow=inlet_flow, T_in=T_inlet, T_out=meth_temp)
-
-                        # #Methanation startup flaring
-                        # startup_flare = np.asarray([(np.array(meth_startup) * inlet_flow[0,:] * (1-meth_loss_factor)), (np.array(meth_startup) * inlet_flow[1,:] * (1-meth_loss_factor)), (np.array(meth_startup) * inlet_flow[2,:] * (1-meth_loss_factor))])
-                        # flared_gas = np.add(flared_gas, startup_flare)
-                        # inlet_flow = np.add(inlet_flow,-startup_flare)
+                        # Gas mixing (Biogas, hydrogen, temp in; temp out)
+                        inlet_flow, T_inlet = comps.mixer(h2=h2_meth, co2=biogas_in[1], ch4=biogas_in[0], h2_temp=pem.temp, bg_temp=biogas.temp)
 
                         #Methanation (molar flows, temp. in; molar flows, excess heat, electricity consumption out)
                         meth_outlet_flow, meth_power, meth_heat, h2o_cond1, microbial_co2 = comps.methanation(meth_flow=inlet_flow, rated_flow=meth.flow_max, T=meth.temp, T_in=T_inlet, el_cons=meth.el_cons, n=meth.n, microb_cons=meth.microb_cons)
                         meth_outlet_flow = np.asarray(meth_outlet_flow)
                         h2o_cond1 = np.asarray(h2o_cond1)
 
-                        #Condenser (H2O in, energy out)
-                        cond_outlet_flow, cond_heat, cond_power, h2o_cond2, T_cond_out = comps.condenser(flow=meth_outlet_flow, T_in=meth.temp, year=year)
-
-                        #Gas cleaning (molar flows and temp in; pure stream and recirculation out, energy consumption?)
-                        ch4_out, recirc_flow, gas_loss, T_out, p_out = comps.membrane(mem_inlet_flow=cond_outlet_flow, T_in=T_cond_out, p_in=meth.pres, year=year)
-                        #now there is no recirculation, only losses
-                        #Losses from non-used biogas
-                        total_gas_loss = gas_loss + flared_gas #[H2, CO2, CH4]
-                        #PERHAPS WE NEED TO CONSIDER FLARING? Or just losses and assume flared could be easier?
-
-                        #Other variables
-                        #Recirculated water
-                        h2o_recirc = 0 #h2o_cond1 + h2o_cond2
+                        # Condenser (H2O in, energy out) [Not fully implemented]
+                        # cond_outlet_flow, h2o_cond2, T_cond_out, cond_heat, cond_power = comps.condenser(flow=meth_outlet_flow, T_in=meth.temp, year=year)
                         
-                        #Rated total system power
-                        # sys_nominal = math.ceil(((elz_size_degr*1000) + max(meth_power) + max(bg_comp_power)) / 100) * 100
-                        # sys_nominal = round(((pem.size_degr) + max(meth_power) + max(bg_comp_power)),0)
+                        # Gas cleaning (molar flows and temp in; pure stream and recirculation out, energy consumption) [Not fully implemented]
+                        # ch4_out, gas_loss, T_out, p_out = comps.membrane(mem_inlet_flow=cond_outlet_flow, T_in=T_cond_out, p_in=meth.pres, year=year)
                         
-                        #TEMPORARY, REMOVE!
-                        starts = []
-                        for i in range(len(electrolyzer)):
-                            if i > 0:
-                                if electrolyzer[i-1] == 0 and electrolyzer[i] > 0 and electrolyzer_standby[i-1] != 1:
-                                    starts.append(1)
-                                else:
-                                    starts.append(0)
-                            else:
-                                starts.append(0)
-                        
-                        
-                        #Storing results
-                        process['Biogas (CH4) [mol/h]'] = list(biogas_flow[:,0])
-                        process['Biogas (CO2) [mol/h]'] = list(biogas_flow[:,1])
-                        process['H2 demand [mol/h]'] = list(H2_demand)
-                        process['Elz dispatch [kWh/h]'] = list(electrolyzer)
-                        process['System dispatch [kWh/h]'] = list(sys_op)
-                        process['Standby el. [kWh/h]'] = list(sb_el)
-                        process['Elz wind [kWh/h]'] = list(wind_use)
-                        process['Wind gen [kWh/h]'] = list(wind_gen)
-                        process['Elz PV [kWh/h]'] = list(pv_use)
-                        process['PV gen [kWh/h]'] = list(pv_gen)
-                        process['Elz grid [kWh/h]'] = list(grid_use)
-                        process['H2 used [kg/h]'] = list(h2_used)
-                        process['Unmet demand [kgH2/h]'] = list(unmet_demand)
-                        process['O2 WWTP [mol/h]'] = list(o2_demand)
-                        # if by_use == "WWTP+O3":
-                            # process['O3 WWTP [mol/h]'] = list(hourly_o3)
-                        process['H2 production [mol/h]'] = h2_flow
-                        process['H2 to meth [mol/h]'] = h2_in
-                        process['H2 to storage [mol/h]'] = h2st_in
-                        process['H2 from storage [mol/h]'] = h2st_out
-                        if h2st_cap > 0:
-                            process['H2 storage [%]'] = (h2_storage_list/(h2st_cap))*100 #[%]
-                        else:
-                            process['H2 storage [%]'] = 0
-                        process['Elz heat [kWh/h]'] = elz_heat#h_prod#
-                        process['O2 out [mol/h]'] = o2_flow
-                        process['H2O cons [mol/h]'] = h2o_cons
-                        process['Biogas comp [kWh/h]'] = bg_comp_power
-                        process['Biogas temp [C]'] = T_bg_comp
-                        process['Meth CH4 in [mol/h]'] = inlet_flow[2]
-                        process['Meth H2 in [mol/h]'] = inlet_flow[0]
-                        process['Meth CO2 in [mol/h]'] = inlet_flow[1]
-                        process['Meth in temp [C]'] = T_inlet
-                        # process['Preheating [kWh/h]'] = pre_heating
-                        process['Meth CH4 out [mol/h]'] = meth_outlet_flow[2]
-                        process['Meth H2 out [mol/h]'] = meth_outlet_flow[0]
-                        process['Meth CO2 out [mol/h]'] = meth_outlet_flow[1]
-                        process['Meth H2O(g) out [mol/h]'] = meth_outlet_flow[3]
-                        process['Meth H2O(l) out [mol/h]'] = h2o_cond1
-                        process['Meth el [kWh/h]'] = meth_power
-                        process['Meth heat [kWh/h]'] = meth_heat
-                        process['Cond CH4 out [mol/h]'] = cond_outlet_flow[2]
-                        process['Cond H2 out [mol/h]'] = cond_outlet_flow[0]
-                        process['Cond CO2 out [mol/h]'] = cond_outlet_flow[1]
-                        process['Cond H2O(l) out [mol/h]'] = h2o_cond2
-                        process['Cond heat [kWh/h]'] = cond_heat
-                        process['Cond el [kWh/h]'] = cond_power
-                        process['H2O recirc [mol/h]'] = h2o_recirc
-                        process['Cond temp out [C]'] = T_cond_out
-                        process['CH4 out [mol/h]'] = ch4_out
-                        process['Recirc CH4 [mol/h]'] = recirc_flow[2]
-                        process['Recirc H2 [mol/h]'] = recirc_flow[0]
-                        process['Recirc CO2 [mol/h]'] = recirc_flow[1]
-                        process['CH4 loss [mol/h]'] = gas_loss[2]
-                        process['H2 loss [mol/h]'] = gas_loss[0]
-                        process['CO2 loss [mol/h]'] = gas_loss[1]
-                        process['Recirc temp [C]'] = T_out
-                        process['Recirc pres [bar]'] = p_out
-                        process['Microbial CO2 cons [mol/h]'] = microbial_co2
-                        process['CH4 flared [mol/h]'] = flared_gas[2]
-                        process['Stack efficiency [%]'] = stack_eff * 100
-                        process['System efficiency [%]'] = sys_eff * 100
-                        process['Elz standby'] = electrolyzer_standby 
-                        if scenario == "grid":
-                            process['Battery state [%]'] = np.divide(np.array(battery_state) * 100, bat_cap, out=np.zeros_like(battery_state), where=bat_cap!=0)
-                            process['Battery discharging [kWh/h]'] = np.array(battery_dis)
+                        if simulation_details == 'Yes' or simulation_details == 'yes': # Storing detailed results
+                            process['H2 demand [mol/h]'] = H2_demand
+                            process['Elz dispatch [kWh/h]'] = electrolyzer
+                            process['System dispatch [kWh/h]'] = sys_op
+                            process['Standby el. [kWh/h]'] = sb_el
+                            process['Wind use [kWh/h]'] = wind_use
+                            process['Wind gen [kWh/h]'] = res.wind_gen
+                            process['PV use [kWh/h]'] = pv_use
+                            process['PV gen [kWh/h]'] = res.pv_gen
+                            process['Grid use [kWh/h]'] = grid_use
+                            process['Unmet demand [kgH2/h]'] = unmet_demand
+                            process['H2 production [kg/h]'] = h2_production
+                            process['H2 to meth [mol/h]'] = h2_meth
+                            process['H2 to storage [mol/h]'] = h2st_in
+                            process['H2 from storage [mol/h]'] = h2st_out
+                            if storage.h2_size > 0:
+                                process['H2 storage [%]'] = (h2_storage_list/(storage.h2_size))*100
+                            process['Elz heat [kWh/h]'] = elz_heat
+                            process['O2 out [mol/h]'] = o2_flow
+                            process['H2O cons [mol/h]'] = h2o_cons
+                            process['Biogas comp [kWh/h]'] = bg_comp_power
+                            process['Meth CH4 in [mol/h]'] = inlet_flow[2]
+                            process['Meth CO2 in [mol/h]'] = inlet_flow[1]
+                            process['Meth in temp [C]'] = T_inlet
+                            process['CH4 out [mol/h]'] = meth_outlet_flow[2]
+                            process['H2 out [mol/h]'] = meth_outlet_flow[0]
+                            process['CO2 out [mol/h]'] = meth_outlet_flow[1]
+                            process['H2O(g) out [mol/h]'] = meth_outlet_flow[3]
+                            process['H2O(l) out [mol/h]'] = h2o_cond1
+                            process['Meth el [kWh/h]'] = meth_power
+                            process['Meth heat [kWh/h]'] = meth_heat
+                            process['CH4 flared [mol/h]'] = flared_gas[2]
+                            process['Stack efficiency [%]'] = stack_eff * 100
+                            process['System efficiency [%]'] = sys_eff * 100
+                            if storage.bat_size > 0:
+                                process['Battery state [%]'] = np.array(battery_state) * 100 / storage.bat_size
+                                process['Battery discharging [kWh/h]'] = np.array(battery_dis)
 
 
                         """ TECHNICAL ANALYSIS """
 
-                        #Gas production
-                        ch4_p2g = (process['CH4 out [mol/h]'] - process['Meth CH4 in [mol/h]']).sum() * ch4_hhv_mol / 1000 #[MWh] Annual CH4 production increase from P2G
-                        ch4_total = process['CH4 out [mol/h]'].sum() * ch4_hhv_mol / 1000
-                        #Gas loss
-                        ch4_loss = process['CH4 loss [mol/h]'].sum() * ch4_hhv_mol
-                        loss_frac = (process['CH4 loss [mol/h]'].sum() / biogas_flow[:,0].sum()) * 100 #[%] 
-                        flare_frac = (process['CH4 flared [mol/h]'].sum()/biogas_flow[:,0].sum()) * 100 #[%]
-                        total_loss_frac = loss_frac + flare_frac
-                        
-                        # lifetime = 18
-                        
-                        #Operation
-                        #Stack replacement
-                        elz_flh = round(process['Elz dispatch [kWh/h]'].sum() / (pem.size_degr)) #full load hours of the electrolyzer
+                        # Gas production
+                        ch4_p2g = (meth_outlet_flow[2] - inlet_flow[2]).sum() * tec.ch4_mol / 1000 #[MWh] Annual CH4 production increase from P2G
+                        ch4_total = meth_outlet_flow[2].sum() * tec.ch4_mol / 1000
+                        # Gas loss
+                        flare_frac = (flared_gas[2].sum()/biogas.flow[:,0].sum()) * 100 #[%]
+                                                
+                        # Stack replacement
+                        elz_flh = round(electrolyzer.sum() / (pem.size_degr)) # Full load hours of the electrolyzer
                         if pem.stack_rep > 1000: #counting hours
-                            stack_reps = math.floor((elz_flh*lifetime) / pem.stack_rep) #number of stack replacements during project lifetime
+                            stack_reps = math.floor((elz_flh*tec.lifetime) / pem.stack_rep) #number of stack replacements during project lifetime
                         else:
-                            stack_reps = math.floor((lifetime-1) / pem.stack_rep) #number of stack replacements during project lifetime, minus 1 since only 2 replacements are required every ten years for a 30 year lifetime for example
-                        #COULD MAKE SURE NO LATE REPLACEMENTS BY ROUNDING DOWN TO PREVIOUS NUMBER IF ONLY AT FOR EXAMPLE 2.1
+                            stack_reps = math.floor((tec.lifetime-1) / pem.stack_rep) #number of stack replacements during project lifetime, minus 1 since only 2 replacements are required every ten years for a 30 year lifetime for example
 
                         #ELECTRICITY USE
                         
-                        #number of cold starts
-                        starts = []
-                        for i in range(len(process['Elz dispatch [kWh/h]'])):
+                        # Number of cold starts
+                        starts = np.zeros(len(electrolyzer))
+                        starts[0] = 0
+                        for i in range(len(starts)):
                             if i > 0:
-                                if process['Elz dispatch [kWh/h]'][i-1] == 0 and process['Elz dispatch [kWh/h]'][i] > 0 and process['Elz standby'][i-1] != 1:
-                                    starts.append(1)
+                                if electrolyzer[i-1] == 0 and electrolyzer[i] > 0 and electrolyzer_standby[i-1] != 1:
+                                    starts[i] = 1
                                 else:
-                                    starts.append(0)
-                            else:
-                                starts.append(0)
-                        process['Elz cold start'] = starts
-
-                        # #methanation stand-by(off)
-                        # meth_standby = []
-                        # for i in range(len(process['Elz dispatch [kWh/h]'])):
-                        #     if process['Meth el [kWh/h]'][i] > 0:
-                        #         meth_standby.append(0)
-                        #     else:
-                        #         meth_standby.append(1)
+                                    starts[i] = 0
+                        if simulation_details == 'Yes' or simulation_details == 'yes':
+                            process['Elz cold start'] = starts
                         
-                        if scenario == "grid":
-                            #Battery operation
-                            bat_in = []
-                            bat_in_wind = []
-                            excess_wind = []
-                            bat_in_pv = []
-                            excess_pv = []
-                            bat_in_grid = []
-                            bat_loss = []
-                            for h in range(len(process['Battery state [%]'])):
+                        # Excess wind/PV. First using any excess PV (cheaper), then any excess wind if residual load remains
+                        if storage.bat_size > 0: # If battery is included
+                            bat_in = np.zeros(len(electrolyzer))
+                            bat_in_wind = np.zeros(len(electrolyzer))
+                            excess_wind = np.zeros(len(electrolyzer))
+                            bat_in_pv = np.zeros(len(electrolyzer))
+                            excess_pv = np.zeros(len(electrolyzer))
+                            bat_in_grid = np.zeros(len(electrolyzer))
+                            bat_loss = np.zeros(len(electrolyzer))
+                            for h in range(len(electrolyzer)):
                                 if h == 0:
-                                    bat_in.append((process['Battery state [%]'][h]) * bat_cap / 100)
-                                    bat_in_pv.append(round(min((pv_gen[h] - process['Elz PV [kWh/h]'][h]), bat_in[h]),6))#(bat_cap-(process['Battery state [%]'][h]*bat_cap/100))),6))
-                                    excess_pv.append(round(max((pv_gen[h] - process['Elz PV [kWh/h]'][h]) - bat_in_pv[h],0),6))#(bat_cap-(process['Battery state [%]'][h]*bat_cap/100)),0),6))
-                                    bat_in_wind.append(round(min((wind_gen[h] - process['Elz wind [kWh/h]'][h]), bat_in[h] - bat_in_pv[h]),6))#((bat_cap-(process['Battery state [%]'][h]*bat_cap/100))-bat_in_pv[h])),6))
-                                    excess_wind.append(round(max((wind_gen[h] - process['Elz wind [kWh/h]'][h]) - bat_in_wind[h],0),6))#((bat_cap-(process['Battery state [%]'][h]*bat_cap/100))-bat_in_pv[h]),0),6))
-                                    bat_in_grid.append(round(bat_in[h] - bat_in_pv[h] - bat_in_wind[h],6))
-                                    bat_loss.append(bat_in[h] * (1-bat_eff))
-    
+                                    bat_in[i] = battery_state[h]
+                                    bat_in_pv[i] = np.round(np.minimum((res.pv_gen[h] - pv_use[h]), bat_in[h]),6)
+                                    excess_pv[i] = np.round(np.maximum((res.pv_gen[h] - pv_use[h]) - bat_in_pv[h],0),6)
+                                    bat_in_wind[i] = np.round(np.minimum((res.wind_gen[h] - wind_use[h]), bat_in[h] - bat_in_pv[h]),6)
+                                    excess_wind[i] = np.round(np.maximum((res.wind_gen[h] - wind_use[h]) - bat_in_wind[h],0),6)
+                                    bat_in_grid[i] = np.round(bat_in[h] - bat_in_pv[h] - bat_in_wind[h],6)
+                                    bat_loss[i] = bat_in[h] * (1-storage.bat_eff)
+        
                                 else:
-                                    bat_in.append(round((max((process['Battery state [%]'][h] - process['Battery state [%]'][h-1]),0) * bat_cap / 100),6))
-                                    bat_in_pv.append(round(min((pv_gen[h] - process['Elz PV [kWh/h]'][h]), bat_in[h]),6))#(bat_cap-(process['Battery state [%]'][h]*bat_cap/100))),6))
-                                    excess_pv.append(round(max((pv_gen[h] - process['Elz PV [kWh/h]'][h]) - bat_in_pv[h],0),6))#(bat_cap-(process['Battery state [%]'][h]*bat_cap/100)),0),6))
-                                    bat_in_wind.append(round(min((wind_gen[h] - process['Elz wind [kWh/h]'][h]), bat_in[h] - bat_in_pv[h]),6))#((bat_cap-(process['Battery state [%]'][h]*bat_cap/100))-bat_in_pv[h])),6))
-                                    excess_wind.append(round(max((wind_gen[h] - process['Elz wind [kWh/h]'][h]) - bat_in_wind[h],0),6))#((bat_cap-(process['Battery state [%]'][h]*bat_cap/100))-bat_in_pv[h]),0),6))
-                                    bat_in_grid.append(round(bat_in[h] - bat_in_pv[h] - bat_in_wind[h],6))
-                                    bat_loss.append(bat_in[h] * (1-bat_eff))
-    
+                                    bat_in[i] = np.round((np.maximum((battery_state[h] - battery_state[h-1]),0)),6)
+                                    bat_in_pv[i] = np.round(np.minimum((res.pv_gen[h] - pv_use[h]), bat_in[h]),6)
+                                    excess_pv[i] = np.round(np.maximum((res.pv_gen[h] - pv_use[h]) - bat_in_pv[h],0),6)
+                                    bat_in_wind[i] = np.round(np.minimum((res.wind_gen[h] - wind_use[h]), bat_in[h] - bat_in_pv[h]),6)
+                                    excess_wind[i] = np.round(np.maximum((res.wind_gen[h] - wind_use[h]) - bat_in_wind[h],0),6)
+                                    bat_in_grid[i] = np.round(bat_in[h] - bat_in_pv[h] - bat_in_wind[h],6)
+                                    bat_loss[i] = bat_in[h] * (1-storage.bat_eff)
                             
-                            #Excess wind/PV (how to get 100 % RES here? Either include storage here, or include auxiliaries in MILP)
-                            if year == 2020:
-                                excess_wind = np.maximum(np.array(wind_gen - process['Elz wind [kWh/h]'] - bat_in_wind), np.zeros(8784,))
-                                excess_pv = np.maximum(np.array(pv_gen - process['Elz PV [kWh/h]'] - bat_in_pv), np.zeros(8784,))
-                            else:
-                                excess_wind = np.maximum(np.array(wind_gen - process['Elz wind [kWh/h]'] - bat_in_wind), np.zeros(8760,))
-                                excess_pv = np.maximum(np.array(pv_gen - process['Elz PV [kWh/h]'] - bat_in_pv), np.zeros(8760,))
-                            # non_exported_pv = np.maximum(np.array(excess_pv) - sys_nominal,0) #Used in local RES case
-                            #Using first any excess PV (cheaper), then any excess wind if residual load remains
-                            residual_load = np.array(process['Biogas comp [kWh/h]'] + process['Meth el [kWh/h]'] + (process['Elz standby'] * pem.standby_cost * pem.size_degr))# + (np.array(meth_standby) * meth_standby_cons))
-                            # used_excess_pv = np.minimum(residual_load, excess_pv)
-                            # used_excess_wind = np.minimum(residual_load - used_excess_pv, excess_wind)
-                            # excess_res_load_frac = sum(used_excess_pv+used_excess_wind) / sum(residual_load) #how much of the residual load could we cover with excess wind/pv
-                            curtailment = (excess_wind.sum() + excess_pv.sum()) / 1000 #[MWh]
-                            tot_res = (wind_gen.sum() + pv_gen.sum()) / 1000 #[MWh]
-                            if tot_res > 0:
-                                curt_frac = curtailment * 100 / tot_res #[%]
-                            else:
-                                curt_frac = 0
-                            #Renewable electricity fraction
-                            res_frac = sum(process['Elz wind [kWh/h]'] + process['Elz PV [kWh/h]'] + bat_in_wind + bat_in_pv) / sum(process['System dispatch [kWh/h]'])
+                            # Renewable electricity fraction
+                            res_frac = (wind_use + pv_use + bat_in_wind + bat_in_pv).sum() / sys_op.sum()
                             if wind_size > 0:
-                                # unused_wind_frac = sum((excess_wind-used_excess_wind)) / sum(res_gen.iloc[:,0])
-                                # unused_res_frac = sum((excess_pv-used_excess_pv) + (excess_wind-used_excess_wind)) / sum(res_gen.iloc[:,0] + res_gen.iloc[:,1])
-                                wind_frac = sum(process['Elz wind [kWh/h]'] + bat_in_wind) / sum(process['Elz wind [kWh/h]'] + process['Elz PV [kWh/h]'] + bat_in_wind + bat_in_pv)
+                                wind_frac = (wind_use + bat_in_wind).sum() / (wind_use + pv_use + bat_in_wind + bat_in_pv).sum()
                             if pv_size > 0:
-                                # unused_pv_frac = sum((excess_pv-used_excess_pv)) / sum(res_gen.iloc[:,1])
-                                pv_frac = sum(process['Elz PV [kWh/h]'] + bat_in_pv) / sum(process['Elz wind [kWh/h]'] + process['Elz PV [kWh/h]'] + bat_in_wind + bat_in_pv)
-                        elif scenario == "res":
-                            res_frac = 1
-                        #STORAGE
-                        if h2st_cap > 0:
-                            #Number of full storage cycles
-                            h2st_cycles = round(process['H2 to storage [mol/h]'].sum() * 2.02 / (h2st_cap * 1000))
-                            #Percent of time above 90 % full
-                            h2st_90 = ((process['H2 storage [%]'] > 90) * 1).sum() / len(process['H2 storage [%]'])
+                                pv_frac = (pv_use + bat_in_pv).sum() / (wind_use + pv_use + bat_in_wind + bat_in_pv).sum()
+
+                        else:
+                            if year == 2020:
+                                excess_wind = np.maximum(res.wind_gen - wind_use, np.zeros(8784,))
+                                excess_pv = np.maximum(res.pv_gen - pv_use, np.zeros(8784,))
+                            else:
+                                excess_wind = np.maximum(res.wind_gen - wind_use, np.zeros(8760,))
+                                excess_pv = np.maximum(res.pv_gen - pv_use, np.zeros(8760,))
+                            
+                            # Renewable electricity fraction
+                            res_frac = (wind_use + pv_use).sum() / sys_op.sum()
+                            if wind_size > 0:
+                                wind_frac = wind_use.sum() / (wind_use + pv_use).sum()
+                            if pv_size > 0:
+                                pv_frac = pv_use.sum() / (wind_use + pv_use).sum()
+
+                        
+                        residual_load = sys_op - electrolyzer #np.array(bg_comp_power + meth_power + (electrolyzer_standby * pem.standby_cost * pem.size_degr))
+                        curtailment = (excess_wind.sum() + excess_pv.sum()) / 1000 #[MWh]
+                        tot_res = (res.wind_gen.sum() + res.pv_gen.sum()) / 1000 #[MWh]
+                        if tot_res > 0:
+                            curt_frac = curtailment * 100 / tot_res #[%]
+                        else:
+                            curt_frac = 0
+                            
+                        if storage.h2_size > 0: # Storage details
+                            h2st_cycles = np.round(h2st_in.sum() * 2.02 / (storage.h2_size * 1000)) # Number of full storage cycles
+                            h2st_90 = (((h2_storage_list*100/storage.h2_size) > 90) * 1).sum() / len(h2_storage_list) # Percent of time above 90 % full
                         else:
                             h2st_cycles = 0
                             h2st_90 = 0
                         
-                        if bat_cap > 0:
-                            #Number of full storage cycles
-                            bat_cycles = round(sum(bat_in) / bat_cap)
-                            #Percent of time above 90 % full
-                            bat_90 = ((process['Battery state [%]'] > 90) * 1).sum() / len(process['Battery state [%]'])
+                        if storage.bat_size > 0: # Battery details
+                            bat_cycles = np.round(bat_in.sum() / storage.bat_size) # Number of full storage cycles
+                            bat_90 = (((battery_state*100/storage.bat_size) > 90) * 1).sum() / len(battery_state) # Percent of time above 90 % full
                         else:
                             bat_cycles = 0
                             bat_90 = 0
                         
-                        #HEAT
-                        heat_wwtp = []
-                        heat_prod = usable_heat * np.array(process['Elz heat [kWh/h]'] + process['Meth heat [kWh/h]']) #low-grade heat produced [kWh/h] (excluding condenser heat for now)
-                        heat_prod_out = heat_prod.clip(min=0) #exclude all interal heat consumption by electrolyzer
-                        total_heat_demand = heat_demand_tot# + process['Preheating [kWh/h]'] #currently excluding preheating since it is negligible (and included in methanation?)
-                        # total_heat_demand = (2*(heat_demand_tot - heat_demand_aux)) + heat_demand_aux
-                        if by_use == "WWTP":
-                            for i in range(len(process['O2 out [mol/h]'])):
-                                heat_wwtp.append(min(heat_prod_out[i], total_heat_demand[i])) #using "heat_prod_out" to avoid negative values at low electrolyzer loads and no methanation
-                            heat_wwtp = np.array(heat_wwtp)
-                            heat_elz_use = heat_prod.clip(max=0) #all interal heat consumption by electrolyzer
-                            heat_elz_use = np.array(-heat_elz_use)
-                            heat_loss = (sum(np.maximum(heat_prod - total_heat_demand,0)) / heat_prod_out.sum()) * 100
-                            heat_use_frac = (heat_wwtp.sum() / heat_prod_out.sum()) * 100 #how much of the output heat is utilized
-                            heat_use_frac_net = (heat_wwtp.sum() / heat_prod.sum()) * 100 #how much of the heat is utilized, including heat consumption by stack
-                            #assuming hygienization:
-                            # heat_use_frac = ((heat_wwtp.sum()+3037000) / heat_prod_out.sum()) * 100
-                            if total_heat_demand.sum() > 0:
-                                heat_wwtp_use_frac = (heat_wwtp.sum() / total_heat_demand.sum()) * 100
-                            else:
-                                heat_wwtp_use_frac = 0
+                        # HEAT
+                        heat_prod = heat.usable * (elz_heat + meth_heat) # Low-grade heat produced [kWh/h] (excluding condenser heat)
+                        heat_prod_out = np.clip(heat_prod, a_min=0, a_max=None) # Exclude potential interal heat consumption by electrolyzer
+                        # total_heat_demand = (2*(heat.demand_tot - heat.demand_aux)) + heat.demand_aux # Use for testing thermophilic digestion in the WWTP
+                        # for i in range(len(process['O2 out [mol/h]'])):
+                            # heat_wwtp.append(min(heat_prod_out[i], heat.demand_tot[i])) #using "heat_prod_out" to avoid negative values at low electrolyzer loads and no methanation
+                        heat_wwtp = np.min(heat_prod_out, heat.demand_tot)
+                        heat_elz_use = -np.clip(heat_prod, a_min=0, a_max=None) # All interal heat consumption by electrolyzer
+                        heat_use_frac = heat_wwtp.sum() * 100 / heat_prod_out.sum() # How much of the output heat is utilized
+                        # heat_use_frac_net = (heat_wwtp.sum() / heat_prod.sum()) * 100 #how much of the heat is utilized, including heat consumption by stack
+                        # heat_use_frac = ((heat_wwtp.sum()+3037000) / heat_prod_out.sum()) * 100 # Assuming hygienization of co-digestion substrate
+                        if heat.demand_tot.sum() > 0:
+                            heat_wwtp_use_frac = (heat_wwtp.sum() / heat.demand_tot.sum()) * 100
+                        else:
+                            heat_wwtp_use_frac = 0
 
-                        #OXYGEN
-                        o2_wwtp = []
-                        o3_wwtp = []
-                        if by_use == "WWTP":
-                            for i in range(len(process['O2 out [mol/h]'])):
-                                o2_wwtp.append(min(process['O2 out [mol/h]'][i], process['O2 WWTP [mol/h]'][i]))
-                            o2_wwtp = np.array(o2_wwtp)
-                            o2_loss = sum(np.maximum(process['O2 out [mol/h]'] - o2_wwtp,0))
-                            o2_loss_frac = (sum(np.maximum(process['O2 out [mol/h]'] - o2_wwtp,0)) / process['O2 out [mol/h]'].sum()) * 100
-                            o2_use_frac = (o2_wwtp.sum() / process['O2 out [mol/h]'].sum()) * 100
-                            o2_wwtp_use_frac = (o2_wwtp.sum() / process['O2 WWTP [mol/h]'].sum()) * 100
-                            o2_energy_savings = aerator_savings * sum(o2_wwtp) * 32 / 1000 #[kWh]
-                            o2_energy_frac = 100 * o2_energy_savings / sum(process['Elz dispatch [kWh/h]']) #% of electrolyzer energy input saved
-                            
-                        #OZONE (could make a better economic case if it's already going to be done)
-                        # o3_demand_annual = 1800000 #[kgO3/y]
-                        # o2_o3_ratio = 10 #[10 kgO2/kgO3]
-                        # o2_o3_demand = o3_demand_annual * o2_o3_ratio
-                        # o3_savings = 5 #[kWh/kgO3]
-                        # total_o3_savings = o3_savings * o3_demand_annual
-                        # o3_savings_cost = total_o3_savings * np.mean(spot_price) / 1000
+                        # OXYGEN
+                        # o2_wwtp = []
+                        # for i in range(len(o2_flow)):
+                        #     o2_wwtp.append(min(o2_flow[i], o2.demand[i]))
+                        o2_wwtp = np.minimum(o2_flow, o2.demand)
+                        o2_loss = np.maximum(o2_flow - o2_wwtp,0).sum()
+                        o2_use_frac = (o2_wwtp.sum() / o2_flow.sum()) * 100
+                        o2_wwtp_use_frac = (o2_wwtp.sum() / o2.demand.sum()) * 100
+                        o2_energy_savings = o2.aerator_savings * o2_wwtp.sum() * 32 / 1000 #[kWh]
+                        # o2_energy_frac = 100 * o2_energy_savings / electrolyzer.sum() # % of electrolyzer energy input saved
 
                         """ ECONOMIC ANALYSIS """
-                        #Include DH here if excess heat, and some heat source if deficit
                         #Should also move to separate script?
-                        #What to do with auxiliary electricity use (h2 and bg compressors etc)? Now included in OPEX, but emissions etc?
 
                         #ELECTRICITY
-                        #Renewables (using LCOE)
-                        # if scenario == "grid":
-                        wind_cost = ((process['Elz wind [kWh/h]']+bat_in_wind) * (wind_lcoe + grid_fee)).sum() / 1000
-                        # pv_cost = ((process['Elz PV [kWh/h]']+bat_in_pv) * (pv_lcoe)).sum() / 1000 #assuming on-site generation, i.e. no grid fee
-                        pv_cost = ((process['Elz PV [kWh/h]']+bat_in_pv) * (pv_lcoe)).sum() / 1000 #For local RES case
-                        # elif scenario == "res":
-                            # res_cost = (process['Elz wind [kWh/h]'] * res_cost).sum() / 1000
-                        curt_cost = ((excess_wind.sum() * wind_lcoe) + (excess_pv.sum() * pv_lcoe)) / 1000 #[€]
-                        #Grid
-                        grid_cost = (process['Elz grid [kWh/h]'] * spot_price).sum() / 1000 #[€] grid fee already included
-                        #Auxiliary costs (cover a fraction of each using excess renewables)
-                        #Start-up costs
-                        startup_costs = (pem.size_degr * pem.start_cost * spot_price * starts / 1000).sum()
-                        #Standby costs (spot or fixed price?)
-                        # standby_costs = (process['Elz standby'] * elz_standby_cost * elz_size_degr * spot_price).sum() 
-                        #Methanation
-                        # meth_el = (process['Meth el [kWh/h]'] * spot_price).sum() * excess_res_load_frac / 1000
-                        # meth_standby_el = (np.array(meth_standby) * meth_standby_cons * spot_price).sum() * excess_res_load_frac #CHECK AND FIX THIS
-                        #Compressor
-                        # bg_comp_el = (process['Biogas comp [kWh/h]'] * spot_price).sum() * excess_res_load_frac / 1000
-                        #Overall electricity costs
-                        # meth_el_cost = meth_el# + meth_standby_el
-                        # elz_el_cost = grid_cost + startup_costs + standby_costs
-                        # if scenario == "grid":
-                        el_cost = wind_cost + pv_cost + grid_cost + startup_costs# + meth_standby_el
-                        el_cost_curt = (el_cost + curt_cost)
-                        # el_cost_curt = process['System dispatch [kWh/h]'].sum() * 10 / 1000
-                        # elif scenario == "res":
-                            # el_cost = res_cost + grid_cost + startup_costs# + meth_standby_el
-                        # tot_el = sum(process['Elz dispatch [kWh/h]'] + (process['Elz standby'] * elz_standby_cost * elz_size_degr) + process['Meth el [kWh/h]'] + process['Biogas comp [kWh/h]'] + (np.array(meth_standby) * meth_standby_cons))
-                        # el_cost1 = ((0.5*tot_el*(wind_lcoe + grid_fee)) / 1000) + ((0.5*tot_el*pv_lcoe) / 1000)
+                        if storage.bat_size > 0:
+                            wind_cost = ((wind_use+bat_in_wind) * (res.wind_lcoe + grid.fee)).sum() / 1000 # Wind via PPA
+                            pv_cost = ((pv_use+bat_in_pv) * (res.pv_lcoe)).sum() / 1000 # Local PV
+                        else:
+                            wind_cost = (wind_use * (res.wind_lcoe + grid.fee)).sum() / 1000 # Wind via PPA
+                            pv_cost = (pv_use * res.pv_lcoe).sum() / 1000 # Local PV
+                        curt_cost = ((excess_wind.sum() * res.wind_lcoe) + (excess_pv.sum() * res.pv_lcoe)) / 1000 # Including curtailed generation at the same cost
+                        grid_cost = (grid_use * grid.spot_price).sum() / 1000 # Grid fee already included
+                        startup_costs = (pem.size_degr * pem.start_cost * grid.spot_price * starts / 1000).sum()
+                        el_cost = wind_cost + pv_cost + grid_cost + startup_costs
+                        el_cost_curt = (el_cost + curt_cost) 
                         #Averages
-                        avg_grid_price = grid_cost * 1000 / process['Elz grid [kWh/h]'].sum() #[€/MWh]
-                        avg_tot_price = el_cost_curt * 1000 / process['System dispatch [kWh/h]'].sum() #[€/MWh]
-                        avg_el_ch4 = el_cost_curt / ch4_p2g #[€/MWh]
-                        #STORAGES
-                        #O2 storage
+                        # avg_grid_price = grid_cost * 1000 / process['Grid use [kWh/h]'].sum() # [€/MWh]
+                        # avg_tot_price = el_cost_curt * 1000 / process['System dispatch [kWh/h]'].sum() # [€/MWh]
+                        # avg_el_ch4 = el_cost_curt / ch4_p2g # [€/MWh]
+                        
+                        # STORAGES
+                        # O2 storage [Not implemented]
                         # o2st_CAPEX = o2st_cap * o2st_capex
                         # o2st_OPEX = o2st_cap * (o2st_opex/100)
-                        #Heat storage
+                        # Heat storage [Not implemented]
                         # heatst_CAPEX = heatst_cap * heatst_capex
                         # heatst_OPEX = heatst_cap * (heatst_opex/100)
-                        #Battery
-                        bat_CAPEX = bat_cap * bat_capex
-                        bat_OPEX = bat_cap * (bat_opex/100)
+                        # Battery
+                        bat_CAPEX = storage.bat_size * storage.bat_capex
+                        bat_OPEX = storage.bat_size * (storage.bat_opex/100)
 
-                        #HYDROGEN
-                        #Electrolyzer
-                        # elz_capex = 900*0.5
-                        # elz_CAPEX = elz_capex * elz_size * 1000
-                        elz_CAPEX = pem.capex * pem.capex_ref * ((pem.size/pem.capex_ref)**pem.scaling) #CAPEX with scaling
-                        elz_OPEX = pem.opex * 0.01 * elz_CAPEX
-                        #Water
-                        h2o_opex = pem.water_cost * (process['H2O cons [mol/h]']-process['H2O recirc [mol/h]']).sum() * 18.02 / (1000*997) # €/m3 * mol * g/mol / (1000*kg/m3)
-                        # h2o_opex = water_cost * (process['H2O cons [mol/h]']).sum() * 18.02 / (1000*997) # €/m3 * mol * g/mol / (1000*kg/m3)
-                        #what about when recirculated doesn't match electrolyzer operation?
-                        #Stack replacement
-                        stack_COST = pem.stack_cost * elz_CAPEX #total cost of stack replacements
-                        #Storage
-                        h2st_CAPEX = h2st_cap * h2st.capex
-                        h2st_OPEX = h2st.opex * 0.01 * h2st_CAPEX
-                        #Compressor (USD!!!)
-                        # h2_csomp_capex = (63684.6 * (h2_comp_size**0.4603) * 1.3) * 0.75 #(Khan et al. ch. 5.2 with CAD to USD conversion)
-                        # h2_comp_opex = comp_opex * 0.01 * h2_comp_capex
-                        # h2_comp_el = (process['H2 comp [kWh/h]'] * spot_price).sum() / 1000
-                        #Total hydrogen costs
-                        H2_CAPEX = elz_CAPEX + h2st_CAPEX# + h2_comp_capex
-                        H2_OPEX = elz_OPEX + h2o_opex + h2st_OPEX# + h2_comp_opex + h2_comp_el
-                        H2_STACK = stack_COST #IS THIS CAPEX, OPEX OR OTHER?
+                        # Hydrogen costs
+                        elz_CAPEX = pem.capex * pem.capex_ref * ((pem.size/pem.capex_ref)**pem.scaling) # Electrolyzer CAPEX with scaling
+                        elz_OPEX = pem.opex * 0.01 * elz_CAPEX # Electrolyzer fixed OPEX
+                        h2o_opex = pem.water_cost * h2o_cons.sum() * 18.02 / (1000*997) # Water [€/m3 * mol * g/mol / (1000*kg/m3)]
+                        stack_COST = pem.stack_cost * elz_CAPEX # Total cost of stack replacements
+                        h2st_CAPEX = storage.h2_size * storage.h2st_capex # H2 storage CAPEX
+                        h2st_OPEX = storage.h2st_opex * 0.01 * h2st_CAPEX # H2 storage OPEX
+                        H2_CAPEX = elz_CAPEX + h2st_CAPEX # Total hydrogen CAPEX
+                        H2_OPEX = elz_OPEX + h2o_opex + h2st_OPEX # Total hydrogen OPEX
+                        H2_STACK = stack_COST # Stack replacement costs
 
-                        #BIOGAS
-                        # biogas_CAPEX = biogas_capex * max(biogas_flow.iloc[:,0]) * ch4_hhv_mol #[€]
-                        # biogas_OPEX = biogas_CAPEX * biogas_opex / 100 #[€]
-                        biogas_loss_cost = biogas_lcoe * (process['CH4 flared [mol/h]'].sum()) * ch4_hhv_mol / 1000
-                        biogas_cost_tot = biogas_lcoe * (process['Biogas (CH4) [mol/h]'].sum()) * ch4_hhv_mol / 1000
+                        # Biogas costs
+                        biogas_loss_cost = biogas.lcoe * flared_gas[2].sum() * tec.ch4_mol / 1000
+                        biogas_cost_tot = biogas.lcoe * biogas.flow[:,0].sum() * tec.ch4_mol / 1000
                         
-                        #METHANATION
-                        #Reactor
-                        # meth_capex = 600*0.9
-                        # meth_CAPEX = meth_capex * meth_size * 1000 #(is the cost based on electricity input or gas output?)
-                        meth_CAPEX = meth.capex * meth.capex_ref * ((meth.size/meth.capex_ref)**meth.scaling) #CAPEX with scaling per MWth out
-                        meth_OPEX = meth.opex * 0.01 * meth_CAPEX #fixed opex
-                        #Compressor
-                        bg_comp_capex = 30000*(bg_comp_size**0.48) #(Kirchbacher et al., 2019)
-                        bg_comp_opex = comp_opex * 0.01 * bg_comp_capex
-                        #Total methanation costs
-                        METH_CAPEX = meth_CAPEX + bg_comp_capex
-                        METH_OPEX = meth_OPEX + bg_comp_opex# + bg_comp_el (compressor electricity included above)
+                        # Methanation costs
+                        meth_CAPEX = meth.capex * meth.capex_ref * ((meth.size/meth.capex_ref)**meth.scaling) # Methanation CAPEX with scaling per MWCH4 out
+                        meth_OPEX = meth.opex * 0.01 * meth_CAPEX # Methanarion fixed OPEX
+                        bg_comp_capex = 30000*(bg_comp.size**0.48) # Biogas compressor CAPEX
+                        bg_comp_opex = bg_comp.opex * 0.01 * bg_comp_capex # Biogas compressor OPEX
+                        METH_CAPEX = meth_CAPEX + bg_comp_capex # Total methanation CAPEX
+                        METH_OPEX = meth_OPEX + bg_comp_opex # Total methanation OPEX
 
-                        #GAS LOSSES
-                        # loss_cost = 0 #process['CH4 loss [mol/h]'].sum() * ch4_hhv_mol * gas_price #LHV or HHV?
-
-                        #BY-PRODUCT SYSTEM COSTS (include scaling effects with a SF of 0.6?)
-                        heat_size = (pem.heat_max + meth.heat_max) * usable_heat
-                        heat_system_CAPEX = heat_integration_capex * heat_integration_ref * ((heat_size/heat_integration_ref)**heat_integration_scaling) #(elz_size+meth_size) * 1000 * heat_integration_capex #(elz_CAPEX+meth_CAPEX) * heat_integration_capex/100
-                        heat_piping_CAPEX = heat_piping_capex * piping_dist
-                        heat_integration_CAPEX = heat_system_CAPEX + heat_piping_CAPEX
-                        heat_integration_OPEX = heat_integration_CAPEX * (heat_integration_opex/100)
-                        o2_piping_CAPEX = o2_piping_capex * piping_dist
-                        o2_aerator_CAPEX = o2_aerator_capex * o2_aerator_ref * ((pem.size/o2_aerator_ref)**o2_integration_scaling)
-                        o2_integration_CAPEX = o2_piping_CAPEX + o2_aerator_CAPEX #elz_size * 1000 * o2_integration_capex
-                        o2_integration_OPEX = o2_integration_CAPEX * (o2_integration_opex/100)
-                        BY_CAPEX = heat_integration_CAPEX + o2_integration_CAPEX
-                        BY_OPEX = heat_integration_OPEX + o2_integration_OPEX
-                        rel_heat_capex = heat_integration_CAPEX * 100 / (elz_CAPEX + meth_CAPEX)
-                        rel_o2_capex = o2_integration_CAPEX * 100 / (elz_CAPEX + meth_CAPEX)
+                        # By-product integration costs
+                        heat_size = (pem.heat_max + meth.heat_max) * heat.usable # [kW] Size of heat system
+                        heat_system_CAPEX = heat.capex * heat.capex_ref * ((heat_size/heat.capex_ref)**heat.scaling) # Heat equipment CAPEX
+                        heat_piping_CAPEX = heat.piping_capex * tec.piping_dist # Heat piping CAPEX
+                        heat_integration_CAPEX = heat_system_CAPEX + heat_piping_CAPEX # Total heat CAPEX
+                        heat_integration_OPEX = heat_integration_CAPEX * (heat.opex/100) # Heat OPEX
+                        o2_aerator_CAPEX = o2.aerator_capex * o2.aerator_ref * ((pem.size/o2.aerator_ref)**o2.aerator_scaling) # Oxygen aerator CAPEX
+                        o2_piping_CAPEX = o2.piping_capex * tec.piping_dist # Oxygen piping CAPEX
+                        o2_integration_CAPEX = o2_piping_CAPEX + o2_aerator_CAPEX # Total oxygen CAPEX
+                        o2_integration_OPEX = o2_integration_CAPEX * (o2.opex/100) # Oxygen OPEX
+                        BY_CAPEX = heat_integration_CAPEX + o2_integration_CAPEX # Total by-product CAPEX
+                        BY_OPEX = heat_integration_OPEX + o2_integration_OPEX # Total by-product OPEX
+                        # rel_heat_capex = heat_integration_CAPEX * 100 / (elz_CAPEX + meth_CAPEX) # Heat CAPEX share of PEM and methanation
+                        # rel_o2_capex = o2_integration_CAPEX * 100 / (elz_CAPEX + meth_CAPEX) # Oxygen CAPEX share of PEM and methanation
                         
-                        #CO2 cost
-                        co2_opex = co2_cost * sum(co2_in) * 44.01 / (1000*1000)
+                        co2_opex = tec.co2_cost * sum(co2_in) * 44.01 / (1000*1000) # CO2 cost (assumed zero)
                         
-                        #OVERALL COSTS
-                        CAPEX = H2_CAPEX + METH_CAPEX + BY_CAPEX + bat_CAPEX# + o2st_CAPEX + heatst_CAPEX
-                        OPEX = H2_OPEX + METH_OPEX + BY_OPEX + el_cost + bat_OPEX + co2_opex# + o2st_OPEX + heatst_OPEX + loss_cost
-                        OPEX_curt = H2_OPEX + METH_OPEX + BY_OPEX + el_cost_curt + bat_OPEX + co2_opex# o2st_OPEX + heatst_OPEX + loss_cost
-                        #Installation cost
-                        INSTALL = CAPEX * (0+(install_cost/100))
-                        CAPEX = CAPEX + INSTALL
-
-                        #Including biogas plant costs
-                        # CAPEX_tot = CAPEX + biogas_CAPEX
-                        # OPEX_tot = OPEX + biogas_OPEX
-                        OPEX_tot = OPEX + biogas_loss_cost
-                        OPEX_tot_curt = OPEX_curt + biogas_loss_cost
-                        OPEX_msp = OPEX_curt + biogas_cost_tot
-                        OPEX_msp_nocurt = OPEX + biogas_cost_tot
-                        #BY-PRODUCT INCOME
-                        #Oxygen
-                        o2_income = sum(o2_wwtp * 32 * aerator_savings * spot_price / (1000*1000)) #[€]
-                        # o2_income = (sum(o2_wwtp * 32 * aerator_savings * spot_price / (1000*1000))*0.85) + (sum(o2_wwtp * 32 * 0.7 * spot_price / (1000*1000))*0.15)
-                        #Heat
-                        # heat_income = (heat_wwtp.sum() - heat_elz_use.sum()) * dh_price / 1000 #[€]
-                        #Variable DH price
-                        heat_income = (((heat_wwtp[0:1415]-heat_elz_use[0:1415]).sum() + (heat_wwtp[8016:8759]-heat_elz_use[8016:8759]).sum())*dh_winter/1000) + (((heat_wwtp[1416:3623]-heat_elz_use[1416:3623]).sum() + (heat_wwtp[5832:8015]-heat_elz_use[5832:8015]).sum())*dh_spr_aut/1000) + (((heat_wwtp[3624:5831]-heat_elz_use[3624:5831]).sum())*dh_summer/1000) 
-                        #assuming replacing hygienization as well:
-                        # heat_income = heat_income + (np.average([dh_winter,dh_summer,dh_spr_aut,dh_spr_aut]) * 3037) #[€]
-                        #assuming fix utilization factor:
-                        # heat_income = np.average([dh_winter,dh_summer,dh_spr_aut,dh_spr_aut]) * heat_prod.sum() * heat_frac_use / 1000
-                        #Total
-                        BY_INCOME = o2_income + heat_income
+                        # Overall costs
+                        CAPEX = H2_CAPEX + METH_CAPEX + BY_CAPEX + bat_CAPEX
+                        OPEX = H2_OPEX + METH_OPEX + BY_OPEX + el_cost + bat_OPEX + co2_opex
+                        OPEX_curt = H2_OPEX + METH_OPEX + BY_OPEX + el_cost_curt + bat_OPEX + co2_opex
+                        # Installation cost
+                        CAPEX *= (1+(tec.install_cost/100)) # Total CAPEX including installation
+                        OPEX_tot = OPEX + biogas_loss_cost # Including flared biogas costs
+                        OPEX_tot_curt = OPEX_curt + biogas_loss_cost # Including flared biogas and curtailment costs
+                        OPEX_msp = OPEX_curt + biogas_cost_tot # Including biogas plant costs
+                        OPEX_msp_nocurt = OPEX + biogas_cost_tot # Including biogas plant and curtailment costs
+                        
+                        # By-product income
+                        o2_income = (o2_wwtp * 32 * o2.aerator_savings * grid.spot_price / (1000*1000)).sum() # Oxygen
+                        # o2_income = ((o2_wwtp * 32 * aerator_savings * grid.spot_price / (1000*1000))*0.85).sum() + ((o2_wwtp * 32 * 0.7 * grid.spot_price / (1000*1000))*0.15).sum() # Income with a fraction of ozone production
+                        heat_income = (((heat_wwtp[0:1415]-heat_elz_use[0:1415]).sum() + (heat_wwtp[8016:8759]-heat_elz_use[8016:8759]).sum())*heat.dh_price[3]/1000) + (((heat_wwtp[1416:3623]-heat_elz_use[1416:3623]).sum() + (heat_wwtp[5832:8015]-heat_elz_use[5832:8015]).sum())*heat.dh_price[0]/1000) + (((heat_wwtp[3624:5831]-heat_elz_use[3624:5831]).sum())*heat.dh_price[1]/1000) #Heat income with variable DH price
+                        # heat_income = heat_income + (np.average([dh_winter,dh_summer,dh_spr_aut,dh_spr_aut]) * 3037) # Assuming replacing hygienization as well
+                        # heat_income = np.average([dh_winter,dh_summer,dh_spr_aut,dh_spr_aut]) * heat_prod.sum() * heat_frac_use / 1000 # Assuming a fix utilization factor
+                        BY_INCOME = o2_income + heat_income # Total by-product income
 
                         """ KPI calculations """
 
@@ -975,44 +548,44 @@ for e in range(len(elz_size_vector)):
                             elif stack_reps == 0:
                                 rep_years = np.array([0])
                         
-                        lcoe = kpis.lcoe(opex=OPEX-BY_INCOME, capex=CAPEX, stack=H2_STACK, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        lcoe = kpis.lcoe(opex=OPEX-BY_INCOME, capex=CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
 
                         #Net present value (discounting stack replacement)
                         # INCOME_GAS = BY_INCOME + (gas_price * ch4_p2g) #[€] Income including gas sales
-                        # npv = kpis.npv(opex=OPEX_tot, income=INCOME_GAS, capex=CAPEX, stack=H2_STACK, dr=discount, lt=lifetime, stack_reps=stack_reps, rep_years=rep_years) #[€]
+                        # npv = kpis.npv(opex=OPEX_tot, income=INCOME_GAS, capex=CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, stack_reps=stack_reps, rep_years=rep_years) #[€]
 
                         #LCOP2G (including lost biogas LCOE)
-                        lcop2g = kpis.lcoe(opex=OPEX_tot-BY_INCOME, capex=CAPEX, stack=H2_STACK, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        lcop2g_curt = kpis.lcoe(opex=OPEX_tot_curt-BY_INCOME, capex=CAPEX, stack=H2_STACK, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        lcop2g = kpis.lcoe(opex=OPEX_tot-BY_INCOME, capex=CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        lcop2g_curt = kpis.lcoe(opex=OPEX_tot_curt-BY_INCOME, capex=CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
 
                         #Minimum selling price
-                        msp = kpis.lcoe(opex=OPEX_msp-BY_INCOME, capex=CAPEX, stack=H2_STACK, dr=discount, lt=lifetime, ch4=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        msp_no_curt = kpis.lcoe(opex=OPEX_msp_nocurt-BY_INCOME, capex=CAPEX, stack=H2_STACK, dr=discount, lt=lifetime, ch4=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        msp = kpis.lcoe(opex=OPEX_msp-BY_INCOME, capex=CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        msp_no_curt = kpis.lcoe(opex=OPEX_msp_nocurt-BY_INCOME, capex=CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
                         #Comparison to amine scrubbing (Check Vo et al., Ardolino et al., Energiforsk 2016, Angelidaki et al. 2018)
                         #Is it really reasonable to assume the maximum value?
                         amine_flow_rate = 1200 #[Nm3/hr]
-                        amine_scrubber_CAPEX = 2500 * amine_flow_rate * nm3_mol #[€]
-                        amine_scrubber_el_cost = sum((process['CH4 out [mol/h]'] - process['Meth CH4 in [mol/h]']) * nm3_mol * 0.14 * spot_price / 1000) #[€]
-                        amine_scrubber_heat_cost = sum((process['CH4 out [mol/h]'] - process['Meth CH4 in [mol/h]']) * nm3_mol * 0.55 * dh_spr_aut / 1000) #[€]
+                        amine_scrubber_CAPEX = 2500 * amine_flow_rate * tec.nm3_mol #[€]
+                        amine_scrubber_el_cost = sum((process['CH4 out [mol/h]'] - process['Meth CH4 in [mol/h]']) * tec.nm3_mol * 0.14 * grid.spot_price / 1000) #[€]
+                        amine_scrubber_heat_cost = sum((process['CH4 out [mol/h]'] - process['Meth CH4 in [mol/h]']) * tec.nm3_mol * 0.55 * np.mean(heat.dh_price) / 1000) #[€]
                         amine_scrubber_opex_fix = amine_scrubber_CAPEX * 0.04
                         amine_scrubber_OPEX = amine_scrubber_el_cost + amine_scrubber_heat_cost + amine_scrubber_opex_fix
-                        # npv_rep = kpis.npv(opex=OPEX_tot-amine_scrubber_OPEX, income=INCOME_GAS, capex=CAPEX-amine_scrubber_CAPEX, stack=H2_STACK, dr=discount, lt=lifetime, stack_reps=stack_reps, rep_years=rep_years) #[€]
-                        lcoe_amine = kpis.lcoe(opex=amine_scrubber_OPEX, capex=amine_scrubber_CAPEX, stack=0, dr=discount, lt=lifetime, ch4=ch4_total-ch4_p2g, stack_reps=0, rep_years=0) #[€/MWh of CH4]
-                        msp_amine = kpis.lcoe(opex=amine_scrubber_OPEX+biogas_cost_tot, capex=amine_scrubber_CAPEX, stack=0, dr=discount, lt=lifetime, ch4=ch4_total-ch4_p2g, stack_reps=0, rep_years=0) #[€/MWh of CH4]
+                        # npv_rep = kpis.npv(opex=OPEX_tot-amine_scrubber_OPEX, income=INCOME_GAS, capex=CAPEX-amine_scrubber_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, stack_reps=stack_reps, rep_years=rep_years) #[€]
+                        lcoe_amine = kpis.lcoe(opex=amine_scrubber_OPEX, capex=amine_scrubber_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_total-ch4_p2g, stack_reps=0, rep_years=0) #[€/MWh of CH4]
+                        msp_amine = kpis.lcoe(opex=amine_scrubber_OPEX+biogas_cost_tot, capex=amine_scrubber_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_total-ch4_p2g, stack_reps=0, rep_years=0) #[€/MWh of CH4]
 
 
                         #By-product analysis
-                        npv_o2 = kpis.npv(opex=o2_integration_OPEX, income=o2_income, capex=o2_integration_CAPEX, stack=0, dr=discount, lt=lifetime, stack_reps=0, rep_years=rep_years) #[€]
-                        npv_heat = kpis.npv(opex=heat_integration_OPEX, income=heat_income, capex=heat_integration_CAPEX, stack=0, dr=discount, lt=lifetime, stack_reps=0, rep_years=rep_years) #[€]
-                        # lcop2g_noo2 = kpis.lcoe(opex=OPEX_tot-heat_income-o2_integration_OPEX, capex=CAPEX-o2_integration_CAPEX, stack=H2_STACK, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        lcop2g_noo2_curt = kpis.lcoe(opex=OPEX_tot_curt-heat_income-o2_integration_OPEX, capex=CAPEX-o2_integration_CAPEX, stack=H2_STACK, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        msp_noo2_curt = kpis.lcoe(opex=OPEX_msp-heat_income-o2_integration_OPEX, capex=CAPEX-o2_integration_CAPEX, stack=H2_STACK, dr=discount, lt=lifetime, ch4=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        # lcop2g_noheat = kpis.lcoe(opex=OPEX_tot-o2_income-heat_integration_OPEX, capex=CAPEX-heat_integration_CAPEX, stack=H2_STACK, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        lcop2g_noheat_curt = kpis.lcoe(opex=OPEX_tot_curt-o2_income-heat_integration_OPEX, capex=CAPEX-heat_integration_CAPEX, stack=H2_STACK, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        msp_noheat_curt = kpis.lcoe(opex=OPEX_msp-o2_income-heat_integration_OPEX, capex=CAPEX-heat_integration_CAPEX, stack=H2_STACK, dr=discount, lt=lifetime, ch4=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        # lcop2g_nobys = kpis.lcoe(opex=OPEX_tot-o2_integration_OPEX-heat_integration_OPEX, capex=CAPEX-o2_integration_CAPEX-heat_integration_CAPEX, stack=H2_STACK, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        lcop2g_nobys_curt = kpis.lcoe(opex=OPEX_tot_curt-o2_integration_OPEX-heat_integration_OPEX, capex=CAPEX-o2_integration_CAPEX-heat_integration_CAPEX, stack=H2_STACK, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        msp_nobys_curt = kpis.lcoe(opex=OPEX_msp-o2_integration_OPEX-heat_integration_OPEX, capex=CAPEX-o2_integration_CAPEX-heat_integration_CAPEX, stack=H2_STACK, dr=discount, lt=lifetime, ch4=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        npv_o2 = kpis.npv(opex=o2_integration_OPEX, income=o2_income, capex=o2_integration_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, stack_reps=0, rep_years=rep_years) #[€]
+                        npv_heat = kpis.npv(opex=heat_integration_OPEX, income=heat_income, capex=heat_integration_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, stack_reps=0, rep_years=rep_years) #[€]
+                        # lcop2g_noo2 = kpis.lcoe(opex=OPEX_tot-heat_income-o2_integration_OPEX, capex=CAPEX-o2_integration_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        lcop2g_noo2_curt = kpis.lcoe(opex=OPEX_tot_curt-heat_income-o2_integration_OPEX, capex=CAPEX-o2_integration_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        msp_noo2_curt = kpis.lcoe(opex=OPEX_msp-heat_income-o2_integration_OPEX, capex=CAPEX-o2_integration_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        # lcop2g_noheat = kpis.lcoe(opex=OPEX_tot-o2_income-heat_integration_OPEX, capex=CAPEX-heat_integration_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        lcop2g_noheat_curt = kpis.lcoe(opex=OPEX_tot_curt-o2_income-heat_integration_OPEX, capex=CAPEX-heat_integration_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        msp_noheat_curt = kpis.lcoe(opex=OPEX_msp-o2_income-heat_integration_OPEX, capex=CAPEX-heat_integration_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        # lcop2g_nobys = kpis.lcoe(opex=OPEX_tot-o2_integration_OPEX-heat_integration_OPEX, capex=CAPEX-o2_integration_CAPEX-heat_integration_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        lcop2g_nobys_curt = kpis.lcoe(opex=OPEX_tot_curt-o2_integration_OPEX-heat_integration_OPEX, capex=CAPEX-o2_integration_CAPEX-heat_integration_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        msp_nobys_curt = kpis.lcoe(opex=OPEX_msp-o2_integration_OPEX-heat_integration_OPEX, capex=CAPEX-o2_integration_CAPEX-heat_integration_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
                         # lcop2g_diff = lcop2g_nobys - lcop2g
                         lcop2g_diff_curt = lcop2g_nobys_curt - lcop2g_curt
                         msp_diff_curt = msp_nobys_curt - msp
@@ -1027,7 +600,7 @@ for e in range(len(elz_size_vector)):
 
                         #TECHNICAL KPIs
                         #System efficiency
-                        tot_energy_cons = (process['Elz dispatch [kWh/h]'] + process['H2 comp [kWh/h]'] + process['Biogas comp [kWh/h]'] + process['Meth el [kWh/h]'] + process['Cond el [kWh/h]'] + process['Standby el. [kWh/h]']).sum()
+                        tot_energy_cons = (process['Elz dispatch [kWh/h]'] + + process['Biogas comp [kWh/h]'] + process['Meth el [kWh/h]'] + process['Standby el. [kWh/h]']).sum()
                         #Methane/Electricity
                         n_gas = (ch4_p2g * 1000) / tot_energy_cons
 
@@ -1041,102 +614,104 @@ for e in range(len(elz_size_vector)):
                         #Theoretical total (using all produced heat)
                         n_theory = ((ch4_p2g * 1000) + (process['Elz heat [kWh/h]'] + process['Meth heat [kWh/h]']).sum()) / tot_energy_cons
                         n_theory_o2 = ((ch4_p2g * 1000) + (process['Elz heat [kWh/h]'] + process['Meth heat [kWh/h]']).sum() + o2_energy_savings) / tot_energy_cons
-                        n_max_o2 = ((ch4_p2g * 1000) + ((process['Elz heat [kWh/h]'] + process['Meth heat [kWh/h]']).sum()*usable_heat) + o2_energy_savings) / tot_energy_cons
+                        n_max_o2 = ((ch4_p2g * 1000) + ((process['Elz heat [kWh/h]'] + process['Meth heat [kWh/h]']).sum()*heat.usable) + o2_energy_savings) / tot_energy_cons
 
                         #Upgrading efficiency (including biogas)
-                        n_upgrade = ((ch4_total * 1000) + sum(heat_wwtp) + o2_energy_savings) / (tot_energy_cons + (biogas_in[0,:].sum()*ch4_hhv_mol))
+                        n_upgrade = ((ch4_total * 1000) + sum(heat_wwtp) + o2_energy_savings) / (tot_energy_cons + (biogas_in[0,:].sum()*tec.ch4_mol))
                         
                         #ENVIRONMENTAL KPIs
-                        #Emissions (INCLUDE OTHER ELECTRICITY CONSUMPTION!)
-                        efs_kpi = kpis.efs(bz=bidding_zone, yr=year) #[AEFs, MEFs]
-                        aef_ems = ((process['Elz grid [kWh/h]'] * efs_kpi.iloc[:,0] / 1000).sum() + (process['Elz wind [kWh/h]'] * wind_efs / 1000).sum() + (process['Elz PV [kWh/h]'] * pv_efs / 1000).sum()) / ch4_p2g #[kgCO2/MWhCH4]
-                        mef_ems = ((process['Elz grid [kWh/h]'] * efs_kpi.iloc[:,1] / 1000).sum() + (process['Elz wind [kWh/h]'] * wind_efs / 1000).sum() + (process['Elz PV [kWh/h]'] * pv_efs / 1000).sum()) / ch4_p2g #[kgCO2/MWhCH4]
-                        aef_avg = (aef_ems*ch4_p2g) / ((process['Elz grid [kWh/h]'] / 1000).sum())
-                        mef_avg = (mef_ems*ch4_p2g) / ((process['Elz grid [kWh/h]'] / 1000).sum())
+                        aef_ems = ((process['Grid use [kWh/h]'] * grid.aefs / 1000).sum() + (process['Wind use [kWh/h]'] * res.wind_efs / 1000).sum() + (process['PV use [kWh/h]'] * res.pv_efs / 1000).sum()) / ch4_p2g #[kgCO2/MWhCH4]
+                        mef_ems = ((process['Grid use [kWh/h]'] * grid.mefs / 1000).sum() + (process['Wind use [kWh/h]'] * res.wind_efs / 1000).sum() + (process['PV use [kWh/h]'] * res.pv_efs / 1000).sum()) / ch4_p2g #[kgCO2/MWhCH4]
+                        aef_avg = (aef_ems*ch4_p2g) / ((process['Grid use [kWh/h]'] / 1000).sum())
+                        mef_avg = (mef_ems*ch4_p2g) / ((process['Grid use [kWh/h]'] / 1000).sum())
 
-                        # aef_ems1 = (((0.5*tot_el*wind_efs + grid_fee) / 1000) + ((0.5*tot_el*pv_efs) / 1000)) / ch4_p2g
                         
                         #Emission reductions from by-product use
-                        aef_ems_red_heat = (sum(heat_wwtp) * dh_emissions / 1000) / ch4_p2g #[kgCO2/MWhCH4]
-                        mef_ems_red_heat = (sum(heat_wwtp) * dh_emissions_marginal / 1000) / ch4_p2g #[kgCO2/MWhCH4]
-                        # aef_ems_red_heat = ((heat_prod.sum() * heat_frac_use) * dh_emissions / 1000) / ch4_p2g #[kgCO2/MWhCH4]
-                        # mef_ems_red_heat = ((heat_prod.sum() * heat_frac_use) * dh_emissions_marginal / 1000) / ch4_p2g #[kgCO2/MWhCH4]
-                        aef_red_o2 = ((aerator_savings * o2_wwtp * 32 / 1000) * efs_kpi.iloc[:,0]).sum() / (1000*ch4_p2g) #[kgCO2/MWhCH4]
-                        mef_red_o2 = ((aerator_savings * o2_wwtp * 32 / 1000) * efs_kpi.iloc[:,1]).sum() / (1000*ch4_p2g) #[kgCO2/MWhCH4]
+                        aef_ems_red_heat = (sum(heat_wwtp) * heat.ems / 1000) / ch4_p2g #[kgCO2/MWhCH4]
+                        mef_ems_red_heat = (sum(heat_wwtp) * heat.ems_marginal / 1000) / ch4_p2g #[kgCO2/MWhCH4]
+                        # aef_ems_red_heat = ((heat_prod.sum() * heat_frac_use) * heat.ems / 1000) / ch4_p2g #[kgCO2/MWhCH4]
+                        # mef_ems_red_heat = ((heat_prod.sum() * heat_frac_use) * heat.ems_marginal / 1000) / ch4_p2g #[kgCO2/MWhCH4]
+                        aef_red_o2 = ((o2.aerator_savings * o2_wwtp * 32 / 1000) * grid.aefs).sum() / (1000*ch4_p2g) #[kgCO2/MWhCH4]
+                        mef_red_o2 = ((o2.aerator_savings * o2_wwtp * 32 / 1000) * grid.mefs).sum() / (1000*ch4_p2g) #[kgCO2/MWhCH4]
                         
                         #Emission increase from biogas losses
-                        bgloss_ems_increase = (biogas_ef * process['CH4 flared [mol/h]'].sum() * ch4_hhv_mol) / (1000*ch4_p2g) #[kgCO2/MWhCH4]
+                        bgloss_ems_increase = (biogas.ef * process['CH4 flared [mol/h]'].sum() * tec.ch4_mol) / (1000*ch4_p2g) #[kgCO2/MWhCH4]
                         
                         #Net system climate impact
                         aef_net = aef_ems - aef_red_o2 - aef_ems_red_heat + bgloss_ems_increase
                         mef_net = mef_ems - mef_red_o2 - mef_ems_red_heat + bgloss_ems_increase
                         
-                        
-                        #Cost breakdown table
-                        #data
-                        # total = kpis.lcoe(opex=OPEX_tot_curt, capex=CAPEX, stack=H2_STACK, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        # elz_lcoe = kpis.lcoe(opex=elz_OPEX, capex=elz_CAPEX, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-                        # stack_rep_lcoe = kpis.lcoe(opex=0, capex=0, stack=stack_COST, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) * 100 / total #[€/MWh of CH4]
-                        # water_lcoe = kpis.lcoe(opex=h2o_opex, capex=0, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-                        # h2st_lcoe = kpis.lcoe(opex=h2st_OPEX, capex=h2st_CAPEX, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-                        # meth_lcoe = kpis.lcoe(opex=meth_OPEX, capex=meth_CAPEX, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-                        # comp_lcoe = kpis.lcoe(opex=bg_comp_opex, capex=bg_comp_capex, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-                        # heat_lcoe = kpis.lcoe(opex=heat_integration_OPEX, capex=heat_integration_CAPEX, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-                        # o2_lcoe = kpis.lcoe(opex=o2_integration_OPEX, capex=o2_integration_CAPEX, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-                        # grid_lcoe = kpis.lcoe(opex=grid_cost, capex=0, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-                        # pv_lcoe1 = kpis.lcoe(opex=pv_cost, capex=0, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-                        # wind_lcoe1 = kpis.lcoe(opex=wind_cost, capex=0, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-                        # bg_loss_lcoe = kpis.lcoe(opex=biogas_loss_cost, capex=0, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total
-                        # install_lcoe = kpis.lcoe(opex=0, capex=INSTALL, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total
-                        # curt_lcoe1 = kpis.lcoe(opex=curt_cost, capex=0, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-                        # o2_income_lcoe = kpis.lcoe(opex=-o2_income, capex=0, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-                        # heat_income_lcoe = kpis.lcoe(opex=-heat_income, capex=0, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-
-                        # #table
-                        # cost_breakdown['{} MW'.format(elz_size)] = [elz_lcoe,stack_rep_lcoe,water_lcoe,h2st_lcoe,meth_lcoe,comp_lcoe,heat_lcoe,o2_lcoe,install_lcoe,bg_loss_lcoe,grid_lcoe,pv_lcoe1,wind_lcoe1,curt_lcoe1,o2_income_lcoe,heat_income_lcoe,lcop2g_curt]
+                        if run_type == "simulation":
+                            # Cost breakdown table
+                            # Data
+                            total = kpis.lcoe(opex=OPEX_tot_curt, capex=CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                            elz_lcoe = kpis.lcoe(opex=elz_OPEX, capex=elz_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+                            stack_rep_lcoe = kpis.lcoe(opex=0, capex=0, stack=stack_COST, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) * 100 / total #[€/MWh of CH4]
+                            water_lcoe = kpis.lcoe(opex=h2o_opex, capex=0, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+                            h2st_lcoe = kpis.lcoe(opex=h2st_OPEX, capex=h2st_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+                            meth_lcoe = kpis.lcoe(opex=meth_OPEX, capex=meth_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+                            comp_lcoe = kpis.lcoe(opex=bg_comp_opex, capex=bg_comp_capex, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+                            heat_lcoe = kpis.lcoe(opex=heat_integration_OPEX, capex=heat_integration_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+                            o2_lcoe = kpis.lcoe(opex=o2_integration_OPEX, capex=o2_integration_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+                            grid_lcoe = kpis.lcoe(opex=grid_cost, capex=0, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+                            pv_lcoe1 = kpis.lcoe(opex=pv_cost, capex=0, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+                            wind_lcoe1 = kpis.lcoe(opex=wind_cost, capex=0, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+                            bg_loss_lcoe = kpis.lcoe(opex=biogas_loss_cost, capex=0, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total
+                            install_lcoe = kpis.lcoe(opex=0, capex=INSTALL, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total
+                            curt_lcoe1 = kpis.lcoe(opex=curt_cost, capex=0, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+                            o2_income_lcoe = kpis.lcoe(opex=-o2_income, capex=0, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+                            heat_income_lcoe = kpis.lcoe(opex=-heat_income, capex=0, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+    
+                            # Table
+                            cost_breakdown['{} MW'.format(elz_size)] = [elz_lcoe,stack_rep_lcoe,water_lcoe,h2st_lcoe,meth_lcoe,comp_lcoe,heat_lcoe,o2_lcoe,install_lcoe,bg_loss_lcoe,grid_lcoe,pv_lcoe1,wind_lcoe1,curt_lcoe1,o2_income_lcoe,heat_income_lcoe,lcop2g_curt]
 
                         if run_type == "optimization":
                             #Saving optimization results
-                            # result_series = pd.Series([lcoe, npv, msp, n_gas, n_tot, n_tot_o2, aef_net, mef_net, total_loss_frac, o2_use_frac, o2_wwtp_use_frac, heat_use_frac, heat_wwtp_use_frac, res_frac])
+                            # result_series = pd.Series([lcoe, npv, msp, n_gas, n_tot, n_tot_o2, aef_net, mef_net, flare_frac, o2_use_frac, o2_wwtp_use_frac, heat_use_frac, heat_wwtp_use_frac, res_frac])
                             # results = pd.concat([results,result_series], axis=1)
                             # results.columns = ['E: {}, M: {}, S: {}, W: {}, P: {}, B: {}'.format(elz_size,meth_scale,h2st_size,wind_size,pv_size,bat_size)]
-                            results['E: {}, M: {}, S: {}, W: {}, P: {}, B: {}'.format(pem.size/1000,meth.size/1000,h2st_size,wind_size/1000,pv_size/1000,bat_size)] = [lcop2g_curt, lcop2g, msp, msp_no_curt, lcoe, n_gas, n_tot, n_tot_o2, aef_net, mef_net, sum(starts), sum(electrolyzer_standby), elz_flh, total_loss_frac, o2_use_frac, o2_wwtp_use_frac, heat_use_frac, heat_wwtp_use_frac, res_frac, lcop2g_diff_curt, lcop2g_diff_rel_curt, msp_diff_curt, msp_diff_rel_curt, npv_o2, npv_heat]
+                            results['E: {}, M: {}, S: {}, W: {}, P: {}, B: {}'.format(pem.size/1000,meth.size/1000,storage.h2_size,wind_size/1000,pv_size/1000,storage.bat_size)] = [lcop2g_curt, lcop2g, msp, msp_no_curt, lcoe, n_gas, n_tot, n_tot_o2, aef_net, mef_net, sum(starts), sum(electrolyzer_standby), elz_flh, flare_frac, o2_use_frac, o2_wwtp_use_frac, heat_use_frac, heat_wwtp_use_frac, res_frac, lcop2g_diff_curt, lcop2g_diff_rel_curt, msp_diff_curt, msp_diff_rel_curt, npv_o2, npv_heat]
                             count = count + 1
                             print('{}/{} simulations performed'.format(count,sims))
     
 
 
+# Save KPIS in a dictionary instead? And print that?
+if run_type == "single":
+    #PRINTING
+    table_kpi = [['LCOP2G', 'MSP', 'Gas eff.', 'O2 eff.', 'AEF net', 'MEF net', 'Loss %', 'RES [%]'], \
+                  [lcop2g_curt, msp, n_gas, n_tot_o2, aef_net, mef_net, flare_frac, res_frac]]
+    print(tabulate(table_kpi, headers='firstrow', tablefmt='fancy_grid'))
 
-# if run_type == "single":
-#     #PRINTING
-#     table_kpi = [['LCOP2G', 'MSP', 'Gas eff.', 'O2 eff.', 'AEF net', 'MEF net', 'Loss %', 'RES [%]'], \
-#                  [lcop2g_curt, msp, n_gas, n_tot_o2, aef_net, mef_net, total_loss_frac, res_frac]]
-#     print(tabulate(table_kpi, headers='firstrow', tablefmt='fancy_grid'))
+    table_by = [['O2 util. [%]', 'O2 dem. [%]', 'Heat util. [%]', '% Heat dem. [%]'], \
+          [o2_use_frac, o2_wwtp_use_frac, heat_use_frac, heat_wwtp_use_frac]]
+    print(tabulate(table_by, headers='firstrow', tablefmt='fancy_grid'))
 
-#     table_by = [['O2 util. [%]', 'O2 dem. [%]', 'Heat util. [%]', '% Heat dem. [%]'], \
-#           [o2_use_frac, o2_wwtp_use_frac, heat_use_frac, heat_wwtp_use_frac]]
-#     print(tabulate(table_by, headers='firstrow', tablefmt='fancy_grid'))
+    # end = time.time()
 
+    # #Subtract Start Time from The End Time
+    # total_time = end - start
+    # print("\n"+ str(total_time))    
 
     # #Costs and energy consumption
     # # Data
     # r = [0,0.25]#,2,3,4]
     # #costs
-    # total = kpis.lcoe(opex=OPEX_tot, capex=CAPEX, stack=H2_STACK, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-    # elz_lcoe = kpis.lcoe(opex=elz_OPEX, capex=elz_CAPEX, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-    # stack_rep_lcoe = kpis.lcoe(opex=0, capex=0, stack=stack_COST, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) * 100 / total #[€/MWh of CH4]
-    # water_lcoe = kpis.lcoe(opex=h2o_opex, capex=0, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-    # h2st_lcoe = kpis.lcoe(opex=h2st_OPEX, capex=h2st_CAPEX, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-    # meth_lcoe = kpis.lcoe(opex=meth_OPEX, capex=meth_CAPEX, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-    # comp_lcoe = kpis.lcoe(opex=bg_comp_opex, capex=bg_comp_capex, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-    # heat_lcoe = kpis.lcoe(opex=heat_integration_OPEX, capex=heat_integration_CAPEX, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-    # o2_lcoe = kpis.lcoe(opex=o2_integration_OPEX, capex=o2_integration_CAPEX, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-    # bat_lcoe = kpis.lcoe(opex=bat_OPEX, capex=bat_CAPEX, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-    # grid_lcoe = kpis.lcoe(opex=grid_cost, capex=0, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-    # pv_lcoe = kpis.lcoe(opex=pv_cost, capex=0, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-    # wind_lcoe = kpis.lcoe(opex=wind_cost, capex=0, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
-    # bg_loss_lcoe = kpis.lcoe(opex=biogas_loss_cost, capex=0, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total
-    # install_lcoe = kpis.lcoe(opex=0, capex=INSTALL, stack=0, dr=discount, lt=lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total
+    # total = kpis.lcoe(opex=OPEX_tot, capex=CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+    # elz_lcoe = kpis.lcoe(opex=elz_OPEX, capex=elz_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+    # stack_rep_lcoe = kpis.lcoe(opex=0, capex=0, stack=stack_COST, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) * 100 / total #[€/MWh of CH4]
+    # water_lcoe = kpis.lcoe(opex=h2o_opex, capex=0, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+    # h2st_lcoe = kpis.lcoe(opex=h2st_OPEX, capex=h2st_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+    # meth_lcoe = kpis.lcoe(opex=meth_OPEX, capex=meth_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+    # comp_lcoe = kpis.lcoe(opex=bg_comp_opex, capex=bg_comp_capex, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+    # heat_lcoe = kpis.lcoe(opex=heat_integration_OPEX, capex=heat_integration_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+    # o2_lcoe = kpis.lcoe(opex=o2_integration_OPEX, capex=o2_integration_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+    # bat_lcoe = kpis.lcoe(opex=bat_OPEX, capex=bat_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+    # grid_lcoe = kpis.lcoe(opex=grid_cost, capex=0, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+    # pv_lcoe = kpis.lcoe(opex=pv_cost, capex=0, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+    # wind_lcoe = kpis.lcoe(opex=wind_cost, capex=0, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
+    # bg_loss_lcoe = kpis.lcoe(opex=biogas_loss_cost, capex=0, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total
+    # install_lcoe = kpis.lcoe(opex=0, capex=INSTALL, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total
     # #energy
     # elz_energy = sum(process['Elz dispatch [kWh/h]'] + process['Standby el. [kWh/h]']) *100 / tot_energy_cons
     # meth_energy = sum(process['Biogas comp [kWh/h]']) * 100 / tot_energy_cons
@@ -1199,8 +774,8 @@ for e in range(len(elz_size_vector)):
     
     # #Heat
     # plt.plot(x, heat_prod_out, label='Heat prod. [kW]')
-    # plt.plot(x, total_heat_demand, label='Total heat demand [kW]')
-    # plt.plot(x, heat_demand_bg, label='Digestion heat demand [kW]')
+    # plt.plot(x, heat.demand_tot, label='Total heat demand [kW]')
+    # plt.plot(x, heat.demand_bg, label='Digestion heat demand [kW]')
     # plt.legend()
     # plt.show()
 
@@ -1212,7 +787,7 @@ for e in range(len(elz_size_vector)):
     # d1 = x1 - x1%24 + 24 #start of the first new day
     # elzload_plot = (h2_flow[x1:x2]*2.02/1000)*100/elz_h2_max
     # h2st_plot = np.array(process['H2 storage [%]'][x1:x2])
-    # ep_plot = spot_price[x1:x2]
+    # ep_plot = grid.spot_price[x1:x2]
     # h2dem_plot = (H2_demand[x1:x2]*2.02/1000)*100 / elz_h2_max
     # o2prod_plot = np.array(process['O2 out [mol/h]'][x1:x2] / 1000)
     # x = range(0,x2-x1)
@@ -1256,8 +831,8 @@ for e in range(len(elz_size_vector)):
     # h2prod_plot = (h2_flow[x1:x2]*2.02/1000)*100/elz_h2_max
     # elz_plot = electrolyzer[x1:x2]
     # h2st_plot = np.array(process['H2 storage [%]'][x1-1:x2-1])
-    # ep_plot = spot_price[x1:x2]
-    # bg_plot = biogas_flow[x1:x2,1]
+    # ep_plot = grid.spot_price[x1:x2]
+    # bg_plot = biogas.flow[x1:x2,1]
     # h2dem_plot = (H2_demand[x1:x2]*2.02/1000)*100 / elz_h2_max
     # h2use_plot = h2_used[x1:x2]*100/elz_h2_max
     # htdem_plot = np.array(np.maximum(heat_demand_tot[x1:x2]-(process['Meth heat [kWh/h]'][x1:x2]*usable_heat),0))
@@ -1307,7 +882,7 @@ for e in range(len(elz_size_vector)):
     # # ax1.plot(x,o2_demand[0:50], color='purple')
     # # ax2 = ax1.twinx()
     # # ax2.spines.right.set_position(("axes", 1.2))
-    # # l4 = ax2.plot(x,spot_price[x1:x2], color='darkorange', label='Electricity price')
+    # # l4 = ax2.plot(x,grid.spot_price[x1:x2], color='darkorange', label='Electricity price')
     # ax4 = ax2.twinx()
     # l5 = ax4.plot(x,o2dem_plot, color='mediumpurple', ls='--', label='O2 demand')
     # l6 = ax4.plot(x,o2prod_plot, color='mediumpurple', label='O2 production')
@@ -1465,10 +1040,10 @@ for e in range(len(elz_size_vector)):
   #   bat_el = el_bat*bat_eff
   #   bat_ls= el_bat-bat_el
   #   el_h2 = process['Elz dispatch [kWh/h]'].sum()/1000
-  #   bg_cm = (biogas_in[0,:].sum()*ch4_hhv_mol/1000)
+  #   bg_cm = (biogas_in[0,:].sum()*tec.ch4_mol/1000)
   #   el_cm = process['Biogas comp [kWh/h]'].sum()/1000
-  #   h2_ch4 = process['H2 used [kg/h]'].sum()*39.4/1000
-  #   bg_ls = process['CH4 flared [mol/h]'].sum()*ch4_hhv_mol/1000
+  #   h2_ch4 = process['H2 used [kg/h]'].sum()*tec.h2_kg/1000
+  #   bg_ls = process['CH4 flared [mol/h]'].sum()*tec.ch4_mol/1000
   #   cm_ch4 = bg_cm+el_cm
   #   el_ch4 = process['Meth el [kWh/h]'].sum()/1000
   #   h2_ht = elz_heat_nonnet.sum()/1000
@@ -1477,7 +1052,7 @@ for e in range(len(elz_size_vector)):
   #   ht_ww = heat_wwtp.sum()/1000
   #   ht_ls = h2_ht+ch4_ht-ht_ww
   #   o2_ww = o2_energy_savings/1000
-  #   o2_ls = aerator_savings * o2_loss * 32 / (1000*1000)
+  #   o2_ls = o2.aerator_savings * o2_loss * 32 / (1000*1000)
   #   h2_ls = el_h2-h2_ch4-h2_ht
   #   ch4_ls = h2_ch4+cm_ch4+el_ch4-ch4_ch4-ch4_ht
     

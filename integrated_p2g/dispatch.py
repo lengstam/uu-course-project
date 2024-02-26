@@ -3708,8 +3708,8 @@ def p2g_wwtp3(
     elz_heat_time: float = 0.0, # [hour] time until electrolyzer has reached operating temperature
     prev_mode: int = 1,  # on/standby/off in last hour of previous day
     elz_eff: float = 0.7,  # HHV
-    wind_cost: float = 0.01,  # [€/MWh]
-    pv_cost: float = 0,  # [€/MWh] (only to prioritize ahead of wind and negative prices)
+    wind_cost: float = -9,  # [€/MWh]
+    pv_cost: float = -10,  # [€/MWh] (only to prioritize ahead of wind and negative prices)
     bat_cap: float = 0, # [kWh]
     bat_eff: float = 0.95, # battery round trip efficiency
     bat_prev: float = 0, # [kWh] previous day battery charge
@@ -4035,8 +4035,8 @@ def p2g_wwtp3(
     
     
     # objective (minimize the electricity cost)
-    prob += plp.lpSum([grid_el[i] * grid[i] / 1000 for i in range(len(grid))]) + plp.lpSum([wind_el[i] * wind_cost for i in range(len(grid))]) + plp.lpSum([pv_el[i] * pv_cost for i in range(len(grid))]) + \
-        ((plp.lpSum([h2_demand[i] - h2_use[i] for i in range(len(grid))]))*10000000) + (plp.lpSum([elz_start[i] * elz_startup_time*elz_max*grid[i] for i in range(len(grid))])) - \
+    prob += plp.lpSum([grid_el[i] * grid[i] / 1000 for i in range(len(grid))]) + plp.lpSum([wind_el[i] * wind_cost / 1000 for i in range(len(grid))]) + plp.lpSum([pv_el[i] * pv_cost / 1000 for i in range(len(grid))]) + \
+        ((plp.lpSum([h2_demand[i] - h2_use[i] for i in range(len(grid))]))*10000000) + (plp.lpSum([elz_start[i] * elz_startup_time*elz_max*grid[i]/1000 for i in range(len(grid))])) - \
             plp.lpSum([o2_use[i] * (o2_power * grid[i] / 1000) for i in range(len(grid))]) - plp.lpSum([heat_income[i] for i in range(len(grid))])# + \
     #electricity costs (grid, wind, pv)
     #oxygen income, and heat income

@@ -31,12 +31,8 @@ def compressor(
     T_in = temp_in + 273.15
     power = (N*(k/(k-1))*(z/n_isen)*T_in*flow*R*(((p_out/p_in)**((k-1)/(N*k)))-1)) / (n_motor*3600*1000) #[kWh] dividing to get mol/s and kW
 
-    #Temperature increase (assume ideal gas, pV=nRT, https://phys.libretexts.org/Bookshelves/University_Physics/Book%3A_University_Physics_(OpenStax)/Book%3A_University_Physics_II_-_Thermodynamics_Electricity_and_Magnetism_(OpenStax)/03%3A_The_First_Law_of_Thermodynamics/3.07%3A_Adiabatic_Processes_for_an_Ideal_Gas#:~:text=When%20an%20ideal%20gas%20is,work%20and%20its%20temperature%20drops.)
-    #T_out = (p_out/p_in) * ((p_in/p_out)**(1/k)) * T_in
-    #Does it make sense to assume such an increase? Probably not as very large...
-    #T_out = T_in - 273.15
-    if isinstance(flow,float):
-        T_out = T_in - 273.15
+    if isinstance(flow,float): 
+        T_out = T_in - 273.15     # Assuming no temperature increase
     else:
         if year == 2020:
             T_out = np.zeros(8784) + T_in - 273.15
@@ -45,56 +41,6 @@ def compressor(
         
     return power, T_out
 
-#In a more detailed electrolyzer: from a cold start, some "waste" heat could be used to heat up the electrolyzer to operating temperature.
-#Need to define how long this will take and define thermal parameters based on that.
-#Storage etc. should not be handled within the electrolyzer component!
-def electrolyzer_simple(
-        dispatch,
-        params,
-        #demand,
-        temp: int = 80,
-        p: int = 30,
-        #h2st_p: int = 100,
-        size: int = 1000, #kWh
-        #n_isen: float = 0.7,
-        #n_motor: float = 0.95,
-        h2o_temp: int = 15,
-) -> pd.DataFrame:
-    """ Returns hydrogen production [mol/h] to methanation/storage, heat production [kWh], 
-    H2 compressor energy [kWh], H2 temperature [C] and O2 flow [mol/h] for one hour of operation """
-    #Yet to consider startup and water use/recirculation (water does only need to be in economic part I think)
-    
-    #Definitions
-    h2_lhv_mol = 0.06726599999999999
-    
-    #Determine efficiency at current hour
-    load = dispatch / size
-    part_load_n = np.interp(load, params.iloc[:,0], params.iloc[:,1])
-    
-    #Calculate gas production (how to handle mismatch between MILP and this more detailed model?)
-    h2_flow = dispatch * part_load_n / h2_lhv_mol #[mol/h] H2 produced
-    #h2st_in = max(0,(h2_flow-demand)) #[mol/h] H2 flow into storage
-    #h2st_out = max(0,(demand-h2_flow)) #[mol/h] H2 flow out from storage
-    o2_flow = h2_flow / 2 #[mol/h]
-    h2o_cons = h2_flow #[mol/h]
-    #h2_meth = h2_flow - h2st_in + h2st_out #[mol/h] H2 to methanation
-    
-    #Thermal model
-    #Input water heating
-    h2o_heating = h2o_cons * 75.3 * (temp - h2o_temp) / (3600*1000) #[kWh] 75.3 is the specific heat capacity of water in J/(K*mol)
-    #Heat production
-    heat = dispatch * (1-((39.4/33.3)*part_load_n)) #[kWh/h]
-    net_heat = heat - h2o_heating
-    if isinstance(dispatch,float):
-        T_out = temp
-    else:
-        T_out = np.zeros(8760) + temp
-    
-    # #H2 compression (only what goes into the storage)
-    # comp_power, T_out = compressor(flow=h2st_in, temp_in=temp, p_in=p, p_out=h2st_p, n_isen=n_isen, n_motor=n_motor)
-    
-    #return h2_flow, h2st_in, h2st_out, heat, comp_power, T_out, o2_flow, h2o_cons, h2_meth
-    return h2_flow, net_heat, T_out, o2_flow, h2o_cons
 
 def electrolyzer(
         dispatch,
@@ -210,59 +156,6 @@ def preheater(
     return heat_req
 
 
-# def methanation_simple(
-#         flow, #H2, CO2, CH4
-#         rated_flow, #[mol/h]
-#         params, #Load range, efficiency, heat, el
-#         T, #C
-#         microb_cons: float = 0.06,
-#         meth_type: str = "bio",
-# ) -> pd.DataFrame:
-#     """ Returns post-methanation flow composition, electricity demand and waste heat 
-#     CURRENTLY NOT CONSIDERING STARTUP AND RAMPING CONSTRAINTS """
-    
-#     #Part load behavior (should this be defined on hydrogen share of input flow?)
-#     load = flow.sum() / rated_flow
-#     n = np.interp(load, params.iloc[:,0], params.iloc[:,1]) #CO2 conversion?
-#     #heat = np.interp(load, params.iloc[:,0], params.iloc[:,2]) * load * 1000 #[kWh/h] #Using method at the bottom instead
-#     el = np.interp(load, params.iloc[:,0], params.iloc[:,3]) * load * 1000 #[kWh/h]
-    
-#     #Microbial CO2 consumption
-#     flow[1] = flow[1] * (1-microb_cons)
-    
-#     #Methanation process
-#     co2_conv = min(flow[1], flow[0]/4) * n
-#     h2_conv = co2_conv * n * 4
-#     ch4_prod = co2_conv
-#     h2o_prod = co2_conv * 2
-#     if meth_type == "bio": #gas contra liquid water output
-#         h2o_cond = h2o_prod * 0.966 #(Goffart de Roeck et al.)
-#         h2o_gas = (1-0.966) * h2o_prod
-#     elif meth_type == "cat":
-#         h2o_cond = 0
-#         h2o_gas = h2o_prod
-
-    
-#     #Microbes consume some CO2 as well? This would increase the H2 demand of the process.
-
-#     output_flow = np.array([(flow[0]-h2_conv), (flow[1]-co2_conv), (flow[2]+ch4_prod), h2o_gas]) #H2, CO2, CH4, H2O(g)
-    
-#     #Heat generation (Find values at operating temperature, below are for 25 C?)
-#     #Heat of formation [J/mol] (Strumpler and Brosig)
-#     #Could simply use heat of reaction (-165kJ/mol) and heat of condenstation?
-#     #See Thema et al. (2019) for example of mass and heat flow equations. Could include electricity losses for heat
-#     hf_h2 = 0
-#     hf_co2 = -393522
-#     hf_ch4 = -74873
-#     hf_h2o = -241827
-#     hoc = -40800 #[J/mol] source?
-    
-#     #Outputs minus inputs (CH4 + H20 + Condensation) - (CO2 and H2)
-#     dH = (((ch4_prod * hf_ch4) + (h2o_prod * hf_h2o) + (h2o_cond * hoc)) - ((co2_conv * hf_co2) + (h2_conv * hf_h2))) / (3600*1000) #[kWh/h]
-#     heat = -dH
-    
-#     return output_flow, el, heat, h2o_cond
-
 def methanation(
         meth_flow, #H2, CO2, CH4
         rated_flow, #[mol CO2 reacted/h]
@@ -335,23 +228,17 @@ def condenser(
         n: float = 1,
         year: float = 2021,
 ) -> pd.DataFrame:
-    """ Returns output flow, waste heat and electricity demand """
-    #Assuming 100 % H2O removal
-    
-    h2o_removed = flow[3]
+    """ Returns output flow, waste heat and electricity demand """    
+    h2o_removed = flow[3]     #Assuming 100 % H2O removal
     output_flow = np.array([flow[0], flow[1], flow[2]]) #[H2, CO2, CH4]
     
-    el = 0
-    if isinstance(h2o_removed,float):
-        T_out = 0
-    else:
-        T_out = np.zeros(8760)
+    # el = 0 # Assuming no energy consumed
     
     #Heat of condensation
     hoc = 40800 #[J/mol] source?
     heat = hoc * h2o_removed / (1000*3600) #[kWh/h]
-    #Also do temperature reduction heat!
-    #Usable heat
+    # Implement temperature reduction heat!
+    # Usable heat
     heat = heat * n
     
     if isinstance(h2o_removed,float):
@@ -362,7 +249,7 @@ def condenser(
         else:
             T_out = np.zeros(8760) + 4
     
-    return output_flow, heat, el, h2o_removed, T_out
+    return output_flow, h2o_removed, T_out, heat#, el
 
 
 def membrane(
@@ -383,7 +270,7 @@ def membrane(
             loss = np.array([mem_inlet_flow[0], mem_inlet_flow[1], np.zeros(8784)], dtype=float) #[mol/h] H2, CO2, CH4 
         else:
             loss = np.array([mem_inlet_flow[0], mem_inlet_flow[1], np.zeros(8760)], dtype=float) #[mol/h] H2, CO2, CH4 
-    recirc = np.array([(mem_inlet_flow[0]-loss[0]), (mem_inlet_flow[1]-loss[1]), (mem_inlet_flow[2]-outlet_flow-loss[2])]) #[mol/h] H2, CO2, CH4
+    # recirc = np.array([(mem_inlet_flow[0]-loss[0]), (mem_inlet_flow[1]-loss[1]), (mem_inlet_flow[2]-outlet_flow-loss[2])]) #[mol/h] H2, CO2, CH4
     
     if isinstance(outlet_flow,float):
         T_out = T_in
@@ -396,7 +283,7 @@ def membrane(
             T_out = np.zeros(8760) + T_in
             p_out = np.zeros(8760) + p_in
     
-    return outlet_flow, recirc, loss, T_out, p_out
+    return outlet_flow, loss, T_out, p_out#, recirc
 
 
 
