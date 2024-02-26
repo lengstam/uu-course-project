@@ -3,7 +3,7 @@ Project within Advanced Scientific Programming with Python 2024
 
 For the project I aim to prepare the code for my current study to be ready for official publishing on GitHub when the manuscript is submitted.
 
-The study is based on a model of a so-called integrated power-to-gas system which is the content of the integrated_p2g package. Hydrogen is produced from electricity and converted to methane using carbon dioxide from biogas from co-digestion. The by-products, heat and oxygen, are utilized in a wastewater treatment plant to reduce the energy use of wastewater treatment. Currently, the project consists of several modules within the package. The main model can be found in 'simulation.py', within which calls to functions in the other modules are made.
+The study is based on a model of a so-called integrated power-to-gas system which is the content of the integrated_p2g directory. Hydrogen is produced from electricity and converted to methane using carbon dioxide from biogas from co-digestion. The by-products, heat and oxygen, are utilized in a wastewater treatment plant to reduce the energy use of wastewater treatment. Currently, the project consists of several modules within the directory. The main model can be found in 'simulation.py', within which calls to functions in the other modules are made.
 
 The following changes are to be made to the project from its previous condition:
 - Improve documentation to a consistent standard similar to numpydoc
