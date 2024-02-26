@@ -1,0 +1,5 @@
+(a) Total time was 16.25 seconds on the first run. Most of the time was spent on lines 31 and 30, i.e. the time increased the further into the nested loop it got.
+
+(b) Most time is consumed on line 51, however, that line calls the "factorize function" defined on line 22. Therefore, we would want to reduce the time spent within that function. Within that function, most time is consumed in for, while and if loops (lines 25, 26 and 29). I'm not sure how to actually optimize this though. The time per hit is very similar for all lines within the function, so one option could be to somehow reduce the amount of hits on the most time consuming lines.
+
+(c) I improved matmult.py by doing numpy matrix multiplication instead, reaching a total time of 1.08 seconds, i.e a 93.35 % reduction. (see matmult_lineprof.py)

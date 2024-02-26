@@ -1,0 +1,8 @@
+Class inheritance
+
+Could implement classes instead of multiple variables? Or dictionaries?
+
+Slicing: a[start:end:step] (modifies data bidirectionally, only when strictly slicing)
+a = b
+a *= 2 --> changes b
+a = 2 * b --> does not change b (creates a new copy, but is slower)

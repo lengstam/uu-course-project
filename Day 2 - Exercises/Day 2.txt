@@ -1,0 +1,6 @@
+Class: functions also with some data.
+
+__init__ can make things available directly when package is imported (e.g. from .mammals import Mammals(or * for all) makes "from mammals import Mammals possible, instead of from mammals.mammals import Mammals). Preferable to simply import the module though, and show which function is being called every time.
+
+Profiling: cProfile or line_profiler. Also %time and %timeit. Scalene.
+Should profile my code before optimizing it.
