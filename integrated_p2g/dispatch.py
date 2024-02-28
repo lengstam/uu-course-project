@@ -3681,7 +3681,7 @@ def p2g_wwtp2_res(
 
 
 def p2g_wwtp3(
-    h2_demand, #[kg/h]
+    h2_dem, #[kg/h]
     heat_demand, #[kWh/h] hourly
     o2_demand, #[mol/h] hourly
     o2_power, #[kWh avoided/kg O2]
@@ -3730,7 +3730,7 @@ def p2g_wwtp3(
     # Methanation ignored since it is based on CO2 availability
 
     #Hourly hydrogen demand (from CO2 availability)    
-    h2_demand = h2_demand.flatten().tolist()
+    h2_demand = h2_dem.flatten().tolist()
     
     wind = list(wind)
     pv = list(pv)

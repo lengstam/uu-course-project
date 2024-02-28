@@ -44,6 +44,7 @@ class Electrolyzer():
     def __init__(self, size):
         self.size = size * 1000 # [kW]
         self.h2_max = self.size * self.n_sys / 39.4
+        self.standby_el = self.size * self.standby_cost
     
     def efficiency(self, plot):
         """
@@ -156,8 +157,8 @@ class Methanation():
     start = 0 #minutes (cold start) NEED TO IMPLEMENT THIS ALSO OUTSIDE THE MILP
     min_load = 0 #minimum load
     n = 0.99 #CO2 conversion efficiency
-    microb_cons = 0#0.06 #fraction of extra CO2 required for microbial growth
-    standby_energy = 0#0.01 #fraction of rated electricity input required for stand-by
+    microb_cons = 0 # Fraction of extra CO2 required for microbial growth
+    standby_energy = 0 # Fraction of rated electricity input required for stand-by
     el_cons = 0.5 #[kWh/Nm3 CH4 produced] In Schlautmann et al. 2020 for example.
     
     capex = 900 #[€/kWCH4] assumed at 5 MW
@@ -320,7 +321,6 @@ class Biogas():
         
         self.flow = np.array([ch4_rate,co2_rate]).transpose()
         self.min_co2 = np.min(np.divide(self.flow[:,1], self.flow[:,1]+self.flow[:,0], out=np.zeros_like(self.flow[:,0])+1, where=self.flow[:,1]+self.flow[:,0]!=0)) #[mol/h] maximum theoretical flow rate to methanation
-
 
 class Heat():
     """

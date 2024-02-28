@@ -31,15 +31,15 @@ def compressor(
     T_in = temp_in + 273.15
     power = (N*(k/(k-1))*(z/n_isen)*T_in*flow*R*(((p_out/p_in)**((k-1)/(N*k)))-1)) / (n_motor*3600*1000) #[kWh] dividing to get mol/s and kW
 
-    if isinstance(flow,float): 
-        T_out = T_in - 273.15     # Assuming no temperature increase
-    else:
-        if year == 2020:
-            T_out = np.zeros(8784) + T_in - 273.15
-        else:
-            T_out = np.zeros(8760) + T_in - 273.15
+    # if isinstance(flow,float): # (Unused and not propoerly defined, assuming no temperature increase)
+    #     T_out = T_in - 273.15     
+    # else:
+    #     if year == 2020:
+    #         T_out = np.zeros(8784) + T_in - 273.15
+    #     else:
+    #         T_out = np.zeros(8760) + T_in - 273.15
         
-    return power, T_out
+    return power
 
 
 def electrolyzer(
@@ -53,55 +53,35 @@ def electrolyzer(
         h2o_temp: int = 15,
         year: float = 2021,
 ) -> pd.DataFrame:
-    """ Returns hydrogen production [mol/h] to methanation/storage, heat production [kWh], 
-    H2 compressor energy [kWh], H2 temperature [C] and O2 flow [mol/h] for one hour of operation """
-   
-    #Calculate gas production in mol/h
-    h2_flow = prod * 1000 / 2.02 #[mol/h] H2 produced
-    o2_flow = h2_flow / 2 #[mol/h]
-    h2o_cons = h2_flow * (h2o_cons*997/(1000*18.02/2.02)) #[mol/h] 10 l/kg H2 from several sources, e.g. Nel Hydrogen
+    """
+    Returns hydrogen production [mol/h] to methanation/storage, heat production [kWh], 
+    H2 compressor energy [kWh], H2 temperature [C] and O2 flow [mol/h] for one hour of operation
     
-    #Efficiency calculation
-    # stack_efficiency = prod * 39.4 / dispatch #HHV
-    # sys_efficiency = prod * 39.4 / (dispatch + aux) #HHV
+    """
+    # Calculate flows in mol/h
+    h2_flow = prod * 1000 / 2.02 # H2 produced [mol/h] 
+    o2_flow = h2_flow / 2 # O2 produced [mol/h] 
+    h2o_cons = h2_flow * (h2o_cons*997/(1000*18.02/2.02)) # Water consumed [mol/h]
+    
+    # Efficiency calculation
     dispatch = np.round(dispatch,5)
     stack_efficiency = np.divide(prod * 39.4, dispatch - aux, out=np.zeros_like(dispatch)+1, where=(dispatch-aux)!=0)
     sys_efficiency = np.divide(prod * 39.4, dispatch, out=np.zeros_like(dispatch), where=dispatch!=0)
     
-    #Thermal model
-    #Input water heating
-    h2o_heating = h2o_cons * 75.3 * (temp - h2o_temp) / (3600*1000) #[kWh] 75.3 is the specific heat capacity of water in J/(K*mol)
-    #Water evaporation
-    # hoc = -40800 #[J/mol] source?
-    # h2o_evap = h2o_cons * -hoc / (3600*1000)
-    #Output hydrogen, oxygen and steam heat loss (including this reduces heat generation by ~2 %)
-    # cp_h2 = 28.82
-    # cp_o2 = 29.39 #https://webbook.nist.gov/cgi/cbook.cgi?ID=C7782447&Mask=1&Type=JANAFG&Table=on
-    # cp_steam = 33.59
-    # T_amb = h2o_temp
-    # h2_heat_loss = h2_flow * cp_h2 * (temp-T_amb) / (3600*1000) #[kWh/h]
-    # o2_heat_loss = o2_flow * cp_o2 * (temp-T_amb) / (3600*1000) #[kWh/h]
-    # p_anode = 30
-    # p_cathode = 30
-    # p_sat_80 = 0.4772 #saturation pressure at 80 C
-    # steam_anode = (p_sat_80/(p_anode-p_sat_80)) * o2_flow
-    # steam_cathode = (p_sat_80/(p_cathode-p_sat_80)) * h2_flow
-    # steam_heat_loss = (steam_anode+steam_cathode) * cp_steam * (temp-T_amb) / (3600*1000) #[kWh/h]
-    #Heat production
-    heat = np.maximum((dispatch-aux) * (1-stack_efficiency),0) #[kWh/h]
-    net_heat = heat - h2o_heating# - h2_heat_loss - o2_heat_loss - steam_heat_loss
-    #Cold start heat loss
-    net_heat = net_heat - (net_heat*startups*heat_time/60) #how much of the hour is spent at too low temperature during cold starts?
+    # Thermal model
+    h2o_heating = h2o_cons * 75.3 * (temp - h2o_temp) / (3600*1000) # #Input water heating [kWh] 75.3 is the specific heat capacity of water in J/(K*mol)
+    heat = np.maximum((dispatch-aux) * (1-stack_efficiency),0) # Heat production [kWh/h]
+    net_heat = heat - h2o_heating # Removing input water heating
+    net_heat = heat - (net_heat*startups*heat_time/60) # Removing cold start heat loss
     
-    if isinstance(dispatch,float):
-        T_out = temp
+    if isinstance(dispatch,float): 
+        T_out = temp # Assuming no temperature change
     else:
         if year == 2020:
             T_out = np.zeros(8784) + temp 
         else:
             T_out = np.zeros(8760) + temp   
     
-    #return h2_flow, h2st_in, h2st_out, heat, comp_power, T_out, o2_flow, h2o_cons, h2_meth
     return h2_flow, net_heat, T_out, o2_flow, h2o_cons, stack_efficiency, sys_efficiency, heat
 
 #should define recirculation here as well if included?
