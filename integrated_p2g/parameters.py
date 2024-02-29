@@ -16,24 +16,78 @@ Classes containing technical parameters for each component as well as a single c
 
 class Electrolyzer():
     """
+    Contains all electrolyzer related values.
     
-    COULD MOVE ECONOMIC CALCULATION TO INSIDE HERE AS WELL?
+    Parameters
+    ----------
+    size : float
+        Defines the size of the current instance of Electrolyzer [MW].
+    
+    Attributes
+    ----------
+    n_sys : float
+        Electrolyzer system efficiency, including auxiliary consumption. HHV basis [fraction].
+    n_stack : float
+        Electrolyzer stack efficiency [fraction]. HHV basis.
+    start_time : float
+        Cold start-up time [min].
+    start_cost : float
+        Cold start-up cost [fraction of rated power].
+    standby_cost : float
+        Standby energy consumption [fraction of rated power].
+    heatup_time : float
+        Time during which no usable waste heat is released after a cold start [min].
+    temp : float
+        Operating temperature [C].
+    h2o_temp : float
+        Input water temperature [C].
+    pres : float
+        Operating pressure [bar].
+    degr : float
+        Stack degradation rate [%/year].
+    stack_rep : float
+        Stack replacement time [years].
+    degr_year : float
+        Year during which average degradation has been reached [years].
+    water_cons : float
+        Water consumption [liter/kgH2].
+    capex : float
+        Capital expenditure at reference size [€/kW].
+    capex_ref : float
+        Reference size for CAPEX [MW].
+    opex : float
+        Operating expenditure [% of CAPEX].
+    scaling : float
+        CAPEX scaling factor.
+    water_cost : float
+        Water cost [€/m3].
+    stack_cost : float
+        Stack replacement cost [% of CAPEX].
+        
+    Methods
+    -------
+    efficiency(plot)
+        Calculates the post-degradation characteristics of the class instance and
+        provides linearization parameters for the efficiency curve.
+        
+    Notes
+    -----
+    None
     """
-    # Class variables (constant)
-    n_sys = 0.75 #HHV system efficiency at full load (part-load is estimated)
-    n_stack = n_sys + 0.05 #HHV stack efficiency at full load
-    start_time = 5 #minutes (cold start)
-    start_cost = start_time/60 #0 #startup cost [fraction of rated power]
-    standby_cost = 0.02 #standby cost [fraction of rated power]
-    heatup_time = 60 #[minutes] the time during which no usable waste heat is released (look into in more detail)
-    temp = 80 #C
-    h2o_temp = 15 #[C] inlet water temperature
-    pres = 30 #bar
-    degr = 1 #[% per year/1000 FLHs depending on stack replacement time below] from Ginsberg, strengthened by van der Roest and within ranges of Buttler
-    stack_rep = 10 #hours if > 1000, years if < 100. If year, define if it is replaced after ten years or at the start of year ten? After ten years now.
-    degr_year = round(stack_rep/2) #which year of operation to consider for efficiency degradation (assuming 0 as year 1)
+    # Class attributes 
+    n_sys = 0.75
+    n_stack = n_sys + 0.05
+    start_time = 5
+    start_cost = start_time/60
+    standby_cost = 0.02
+    heatup_time = 60
+    temp = 80
+    h2o_temp = 15
+    pres = 30
+    degr = 1
+    stack_rep = 10
+    degr_year = round(stack_rep/2)
     water_cons = 10 #[l/kgH2]
-    
     capex = 1500 #[€/kW] at 5 MW
     capex_ref = 5000 #[kW]
     opex = 4 #% of CAPEX
@@ -42,6 +96,16 @@ class Electrolyzer():
     stack_cost = 0.5 #fraction of CAPEX
     
     def __init__(self, size):
+        """
+        Attributes
+        ----------
+        size : float
+            The size of the current instance of Electrolyzer [kW].
+        h2_max : float
+            Hydrogen production at rated capacity [kg/h].
+        standby_el : float
+            Electricity consumption of electrolyzer during standby [kW].
+        """
         self.size = size * 1000 # [kW]
         self.h2_max = self.size * self.n_sys / 39.4
         self.standby_el = self.size * self.standby_cost
@@ -54,24 +118,26 @@ class Electrolyzer():
         Parameters
         ----------
         plot: str {'plot', ''}
-            If 'plot', the linearized and non-linearized efficiency curves will be plotted.
+            If 'plot', the linearized efficiency curves will be plotted.
         
-        Class variables
+        Attributes
         ---------------
-        
-        
-        Returns
-        -------
-        k_values:
-            
-        m_values:
-            
-        aux_cons:
-            
-        sys_eff:
-            
-        stack_eff:
-
+        aux_cons : float
+            Auxiliary electricity consumption [kW].
+        k_values : float
+            Linear term of linearization parameters.
+        m_values : float
+            Constant term of linearization parameters.
+        n_sys_degr : float
+            System efficiency after degradation [fraction].
+        n_stack_degr : float
+            Stack efficiency after degradation [fraction].
+        size_degr : float
+            Actual electrolyzer input capacity after degradation. [kW]
+        min_load : float
+            Minimum electrolyzer load [fraction].
+        heat_max : float
+            Maximum electrolyzer heat generation [kW].
         """
         x = np.linspace(0, 6, num=60001)        
         Fit_1 = 1.44926681  # C
@@ -149,67 +215,162 @@ class Electrolyzer():
         
 class Methanation():
     """
+    Contains all methanation related values.
     
+    Parameters
+    ----------
+    size : float
+        Defines the size of the current instance of Electrolyzer [MW].
+    co2_min : float
+        Minimum CO2 fraction of the biogas flow [fraction].
+    
+    Attributes
+    ----------
+    temp : float
+        Operating temperature [C].
+    pres : float
+        Operating pressure [bar].
+    start : float (Not implemented)
+        Cold start-up time [min].
+    min_load : float
+        Minimum load [fraction of rated power].
+    n : float
+        CO2 conversion efficiency [fraction].
+    microb_cons : float
+        Microbial CO2 consumption [fraction].
+    standby_energy : float
+        Standby energy consumption [fraction of rated electricity consumption].
+    el_cons : float
+        Standby energy consumption [kWh/Nm3CH4 converted].
+    ch4_hhv_vol : float
+        Methane HHV energy content [kWh/m3].
+    ch4_hhv_kg : float
+        Methane HHV energy content [kWh/kg].
+    ch4_hhv_mol : float
+        Methane HHV energy content [kWh/mol].
+    nm3_mol : float
+        Mol to volume conversion [Nm3/mol].
+    capex : float
+        Capital expenditure at reference size [€/kW].
+    capex_ref : float
+        Reference size for CAPEX [MW].
+    opex : float
+        Operating expenditure [% of CAPEX].
+    scaling : float
+        CAPEX scaling factor.
+        
+    Methods
+    -------
+    None
+        
+    Notes
+    -----
+    None
     """
     # Class parameters
-    temp = 65 #C
-    pres = 10 #bar
-    start = 0 #minutes (cold start) NEED TO IMPLEMENT THIS ALSO OUTSIDE THE MILP
-    min_load = 0 #minimum load
-    n = 0.99 #CO2 conversion efficiency
-    microb_cons = 0 # Fraction of extra CO2 required for microbial growth
-    standby_energy = 0 # Fraction of rated electricity input required for stand-by
-    el_cons = 0.5 #[kWh/Nm3 CH4 produced] In Schlautmann et al. 2020 for example.
-    
-    capex = 900 #[€/kWCH4] assumed at 5 MW
-    capex_ref = 5000 #[kW]
-    opex = 8 #% of CAPEX
-    scaling = 0.65 #scaling factor for CAPEX
-    
-    ch4_hhv_vol = 11.05 #kWh/Nm3
-    ch4_hhv_kg = 15.44 #kWh/kg
-    ch4_hhv_mol = ch4_hhv_kg / (1000/16.04) #kWh/mol
-    nm3_mol = ch4_hhv_mol / ch4_hhv_vol #Nm3/mol
+    temp = 65
+    pres = 10
+    # start = 0
+    min_load = 0
+    n = 0.99
+    microb_cons = 0
+    standby_energy = 0
+    el_cons = 0.5
+    ch4_hhv_vol = 11.05
+    ch4_hhv_kg = 15.44
+    ch4_hhv_mol = ch4_hhv_kg / (1000/16.04)
+    nm3_mol = ch4_hhv_mol / ch4_hhv_vol
+    capex = 900
+    capex_ref = 5000
+    opex = 8
+    scaling = 0.65
     
     def __init__(self, size, co2_min):
+        """
+        Attributes
+        ----------
+        size : float
+            The rated capacity of the current instance of Methanation [kWCH4out].
+        size_mol : float
+            The rated capacity of the current instance of Methanation [mol/h].
+        size_vector : float
+            Array of rated capacity.
+        flow_min : float
+            Minimum CO2 flow rate through reactor [mol/h].
+        heat_max : float
+            Maximum heat generation from reactor [kW].
+        spec_heat : float
+            Heat generation per unit gas [kWh/kgH2].
+        spec_el : float
+            Electricity consumption per unit gas [kWh/kgH2].
+        """
         self.size = size * 1000
         self.size_mol = self.size / self.ch4_hhv_mol
         self.size_vector = np.zeros(24,) + self.size_mol
         self.flow_max = self.size_mol / co2_min
         self.flow_min = self.size_mol * self.min_load
-        __, self.el_max, self.heat_max, __, __ = comps.methanation(meth_flow=[self.size_mol*4/(1-self.microb_cons),self.size_mol/(1-self.microb_cons),0], rated_flow=self.size_mol/(1-self.microb_cons), T=self.temp, T_in=self.temp, el_cons=self.el_cons)
+        __, el_max, self.heat_max, __, __ = comps.methanation(meth_flow=[self.size_mol*4/(1-self.microb_cons),self.size_mol/(1-self.microb_cons),0], T=self.temp, T_in=self.temp, el_cons=self.el_cons)
         self.spec_heat = self.heat_max / (4*self.size_mol*2.02/1000)
-        self.spec_el = self.el_max / (4*self.size_mol*2.02/1000) #[kWh/kgH2]
+        self.spec_el = el_max / (4*self.size_mol*2.02/1000) #[kWh/kgH2]
         
         
 class Storage():
     """
+    Contains all storage related values.
     
-    Oxygen and heat storages not fully implemented.
+    Parameters
+    ----------
+    size : float
+        Defines the size of the current instance of storage [kgH2/MWh/kgO2/MWh].
     
-    """
-    #Class variables
-    bat_eff = 0.95 #round trip efficiency of battery
-
-    h2st_capex = 500 # €/kgH2
-    h2st_opex = 1.5 #% of CAPEX
-    bat_capex = 300 #[€/kWh]
-    bat_opex = 2 #% of CAPEX
-    o2st_capex = 0 # €/kgH2
-    o2st_opex = 0 #% of CAPEX
-    heat_capex = 0 #[€/kWh]
-    heat_opex = 0 #% of CAPEX
+    Attributes
+    ----------
+    None
         
-    def __init__(self, h2_size, bat_size, o2_size, heat_size):
-        self.h2_size = h2_size
-        self.bat_size = bat_size
-        self.o2_size = o2_size
-        self.heat_size = heat_size
+    Methods
+    -------
+    None
+    
+    Notes
+    -----
+    Oxygen and heat storages not implemented.
+    """      
+    def __init__(self, storage_type, size):
+        """        
+        Attributes
+        ----------
+        size : float
+            Defines the size of the current instance of storage [kgH2/MWh/kgO2/MWh].
+        capex : float
+            Capital expenditure [€/sizeunit].
+        opex : float
+            Operational expenditure [% of CAPEX].
+        eff : float
+            Storage round efficiency [fraction].
+        """
+        self.size = size
+        
+        if storage_type == 'H2' or storage_type == 'h2' or storage_type == 'Hydrogen' or storage_type == 'hydrogen':
+            self.capex = 500
+            self.opex = 1.5
+            self.eff = 1
+        elif storage_type == 'Battery' or storage_type == 'battery' or storage_type == 'Bat' or storage_type == 'bat':
+            self.capex = 300
+            self.opex = 2
+            self.eff = 1
+        elif storage_type == 'O2' or storage_type == 'o2' or storage_type == 'Oxygen' or storage_type == 'oxygen':
+            self.capex = 0
+            self.opex = 0
+            self.eff = 1
+        elif storage_type == 'Heat' or storage_type == 'heat' or storage_type == 'Thermal' or storage_type == 'thermal':
+            self.capex = 0
+            self.opex = 0
+            self.eff = 1
     
 
 class Compressor():
     """
-    Returns compressor size and electricity consumption.
+    Contains all compressor related values.
     
     Parameters
     ----------
@@ -222,12 +383,26 @@ class Compressor():
     temp_in: float [C]
         Rated inlet temperature of the gas.
     
-    Class variables
+    Class attributes
     ---------------
     n_isen: float
         Isentropic efficiency.
     n_motor: float
         Motor efficiency
+    N: float
+        Number of compressor stages.
+    z: float
+        Compressibility factor.
+    k: float
+        Ratio of specific heats.
+    R: float
+        Ideal gas constant.
+    capex_ref: float
+        Capital expenditure at 1 kW [€/kW].
+    opex: float
+        Operational expenditure [% of CAPEX]
+    scaling: float
+        CAPEX scaling factor.
     
     Returns
     -------
@@ -252,10 +427,6 @@ class Compressor():
     def __init__(self, flow, p_out, p_in, temp_in):
         self.size = (self.N*(self.k/(self.k-1))*(self.z/self.n_isen)*(temp_in+273.15)*flow*self.R*(((p_out/p_in)**((self.k-1)/(self.N*self.k)))-1)) / (self.n_motor*1000)
         self.spec_el = self.size / (flow*3600)
-        
-    # def econ(self):
-    #     self.capex = self.capex_ref*(self.size**self.scaling)
-    #     bg_comp_opex = self.opex * 0.01 * bg_comp_capex
 
 
 class Renewables():

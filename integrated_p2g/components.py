@@ -138,7 +138,6 @@ def preheater(
 
 def methanation(
         meth_flow, #H2, CO2, CH4
-        rated_flow, #[mol CO2 reacted/h]
         T, #C
         T_in,
         ch4_nm3_mol: float = 0.02243, #[Nm3/mol]

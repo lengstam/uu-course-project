@@ -12,3 +12,4 @@
 # from . import other
 # from . import kpis
 # from . import dispatch
+# from . import plotting
