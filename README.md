@@ -11,3 +11,7 @@ The following changes are to be made to the project from its previous condition:
 - Performance improvements through increased NumPy use and optimization of for loops. Most of the time consumption origins in a linear optimization program, the improvement of which is beyond the scope of this project, but smaller gains can likely be made in the surrounding code.
 - Removal of unused segments.
 
+Project outcome:
+- Documentation has been provided within the parameters.py and components.py, as well as a general description of the model in simulation.py.
+- All calculations are now done with NumPy instead of with Pandas arrays/series or lists. Furthermore, any calculations that could be done outside for loops are now done that way. This has led to some improvement in runtime (appears to be a few seconds), but since the main time consumption comes from other places, the overall gains were small (total runtime is still ~1 minute).
+- The size of the main script (simulation.py) has been greatly reduced through increased modularity, implementation of classes and removal of unused code, from almost 1900 rows to around 550, greatly improving readability. 
