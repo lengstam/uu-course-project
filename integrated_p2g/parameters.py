@@ -73,6 +73,7 @@ class Electrolyzer():
     Notes
     -----
     None
+    
     """
     # Class attributes 
     n_sys = 0.75
@@ -105,6 +106,7 @@ class Electrolyzer():
             Hydrogen production at rated capacity [kg/h].
         standby_el : float
             Electricity consumption of electrolyzer during standby [kW].
+            
         """
         self.size = size * 1000 # [kW]
         self.h2_max = self.size * self.n_sys / 39.4
@@ -138,6 +140,7 @@ class Electrolyzer():
             Minimum electrolyzer load [fraction].
         heat_max : float
             Maximum electrolyzer heat generation [kW].
+            
         """
         x = np.linspace(0, 6, num=60001)        
         Fit_1 = 1.44926681  # C
@@ -266,6 +269,7 @@ class Methanation():
     Notes
     -----
     None
+    
     """
     # Class parameters
     temp = 65
@@ -303,6 +307,7 @@ class Methanation():
             Heat generation per unit gas [kWh/kgH2].
         spec_el : float
             Electricity consumption per unit gas [kWh/kgH2].
+            
         """
         self.size = size * 1000
         self.size_mol = self.size / self.ch4_hhv_mol
@@ -334,6 +339,7 @@ class Storage():
     Notes
     -----
     Oxygen and heat storages not implemented.
+    
     """      
     def __init__(self, storage_type, size):
         """        
@@ -347,25 +353,29 @@ class Storage():
             Operational expenditure [% of CAPEX].
         eff : float
             Storage round efficiency [fraction].
+            
         """
-        self.size = size
         
         if storage_type == 'H2' or storage_type == 'h2' or storage_type == 'Hydrogen' or storage_type == 'hydrogen':
             self.capex = 500
             self.opex = 1.5
             self.eff = 1
+            self.size = size
         elif storage_type == 'Battery' or storage_type == 'battery' or storage_type == 'Bat' or storage_type == 'bat':
             self.capex = 300
             self.opex = 2
             self.eff = 1
+            self.size = size * 1000 # [kWh]
         elif storage_type == 'O2' or storage_type == 'o2' or storage_type == 'Oxygen' or storage_type == 'oxygen':
             self.capex = 0
             self.opex = 0
             self.eff = 1
+            self.size = size
         elif storage_type == 'Heat' or storage_type == 'heat' or storage_type == 'Thermal' or storage_type == 'thermal':
             self.capex = 0
             self.opex = 0
             self.eff = 1
+            self.size = size * 1000 # [kWh]
     
 
 class Compressor():
@@ -374,21 +384,21 @@ class Compressor():
     
     Parameters
     ----------
-    flow: float [mol/s]
-        Rated flow rate of gas through the compressor.
-    p_in: float [bar]
-        Gas inlet pressure.
-    p_out: float [bar]
-        Gas outlet pressure.
-    temp_in: float [C]
-        Rated inlet temperature of the gas.
+    flow: float 
+        Rated flow rate of gas through the compressor [mol/s].
+    p_in: float 
+        Gas inlet pressure [bar].
+    p_out: float 
+        Gas outlet pressure [bar].
+    temp_in: float 
+        Rated inlet temperature of the gas [C].
     
     Class attributes
     ---------------
     n_isen: float
-        Isentropic efficiency.
+        Isentropic efficiency [fraction].
     n_motor: float
-        Motor efficiency
+        Motor efficiency [fraction].
     N: float
         Number of compressor stages.
     z: float
@@ -397,76 +407,173 @@ class Compressor():
         Ratio of specific heats.
     R: float
         Ideal gas constant.
-    capex_ref: float
+    capex_ref: float 
         Capital expenditure at 1 kW [€/kW].
-    opex: float
-        Operational expenditure [% of CAPEX]
+    opex: float 
+        Operational expenditure [% of CAPEX].
     scaling: float
         CAPEX scaling factor.
     
-    Returns
+    Methods
     -------
-    comp_size: float [kW]
-        Rated compressor size based on flow rate.
-    comp_spec_el: float [kWh/mol]
-        Specific electricity consumption of the compressor.
+    None
+    
+    Notes
+    -----
+    None
+    
     """
     # Class variables
     n_isen = 0.75
     n_motor = 0.95
-    
+    N = 1 
+    z = 1
+    k = 1.41
+    R = 8.314
     capex_ref = 30000
     opex = 5
     scaling = 0.48
     
-    N = 1 # Number of compressor stages 
-    z = 1 # Assumption, should be a little higher depending in p and T
-    k = 1.41 # Ratio of specific heat
-    R = 8.314 # Gas constant
-    
     def __init__(self, flow, p_out, p_in, temp_in):
+        """        
+        Attributes
+        ----------
+        comp_size: float 
+            Rated compressor size based on flow rate [kW].
+        comp_spec_el: float 
+            Specific electricity consumption of the compressor [kWh/mol].
+            
+        """
         self.size = (self.N*(self.k/(self.k-1))*(self.z/self.n_isen)*(temp_in+273.15)*flow*self.R*(((p_out/p_in)**((self.k-1)/(self.N*self.k)))-1)) / (self.n_motor*1000)
         self.spec_el = self.size / (flow*3600)
 
 
 class Renewables():
     """
+    Contains all wind and solar PV related values, as well as hourly generation profiles.
+    
+    Parameters
+    ----------
+    wind_size: float
+        Rated capacity of wind power [kW].
+    pv_size: float
+        Rated capacity of solar power [kW].
+    year: float
+        Simulation year for determining generation array length.
+    lifetime: float
+        System lifetime for determining solar PV degradation [years].
+    
+    Class attributes
+    ---------------
+    wind_efs: float
+        Carbon intensity of wind power [kgCO2/MWh].
+    pv_efs: float
+        Carbon intensity of wind power [kgCO2/MWh].
+    pv_degr: float
+        Annual PV panel degradation [%/year].
+    wind_lcoe: float
+        Production cost for wind power [€/MWh].
+    pv_lcoe: float
+        Production cost for solar PV [€/MWh].
+    
+    Methods
+    -------
+    None
+    
+    Notes
+    -----
+    None
     
     """
-    # Class variables
-    wind_efs = 15 #[kgCO2/MWh]
-    pv_efs = 70 #[kgCO2/MWh]
-    pv_degr = 0.5 #[%/y]
-    
-    wind_lcoe = 40 # [€/MWh] assumed PPA price
-    pv_lcoe = 45 # [€/MWh]
+    wind_efs = 15
+    pv_efs = 70
+    pv_degr = 0.5
+    wind_lcoe = 40
+    pv_lcoe = 45
     
     def __init__(self, wind_size, pv_size, year, lifetime):
+        """        
+        Attributes
+        ----------
+        wind_gen: array (8760/8784x1)
+            Hourly values of wind generation [kWh/h].
+        pv_gen: array (8760/8784x1)
+            Hourly values of PV generation [kWh/h].
+            
+        """
         self.wind_size = wind_size
         self.pv_size = pv_size
         
         wind_read = r'C:\Users\enls0001\Anaconda3\Lib\site-packages\P2G\Data\wind (Uppsala).xlsx' # Reading Excel data
         pv_read = r'C:\Users\enls0001\Anaconda3\Lib\site-packages\P2G\Data\solar (Uppsala).xlsx'
         if year == 2020:
-            self.wind_gen = np.array(pd.read_excel(wind_read) * (wind_size/3000))[0:8784,0] # Saving data
-            self.pv_gen = np.array(pd.read_excel(pv_read) * (pv_size/3000))[0:8784,0] 
+            try:
+                self.wind_gen = np.array(pd.read_excel(wind_read) * (wind_size/3000))[0:8784,0] # Saving data
+            except FileNotFoundError:
+                print("Error: Wind generation directory not found or file does not exist. Please define a generation profile in the Renewables class.")
+            try:
+                self.pv_gen = np.array(pd.read_excel(pv_read) * (pv_size/3000))[0:8784,0]
+            except FileNotFoundError:
+                print("Error: PV generation directory not found or file does not exist. Please define a generation profile in the Renewables class.")
         else:
-            self.wind_gen = np.array(pd.read_excel(wind_read) * (wind_size/3000))[0:8760,0] # Removing last day
-            self.pv_gen = np.array(pd.read_excel(pv_read) * (pv_size/3000))[0:8760,0]
+            try:
+                self.wind_gen = np.array(pd.read_excel(wind_read) * (wind_size/3000))[0:8760,0] # Removing last day
+            except FileNotFoundError:
+                print("Error: Wind generation directory not found or file does not exist. Please define a generation profile in the Renewables class.")
+            try:
+                self.pv_gen = np.array(pd.read_excel(pv_read) * (pv_size/3000))[0:8760,0]
+            except FileNotFoundError:
+                print("Error: PV generation directory not found or file does not exist. Please define a generation profile in the Renewables class.")
+        
         self.pv_gen *= (1-(round(lifetime/2)*self.pv_degr/100)) # PV degradation
     
 
 class Biogas():
     """
+    Contains all biogas related values, as well as an hourly production profile.
+    
+    Parameters
+    ----------
+    data: str {'real', 'set'}
+        Determines production dataset, either from 'real' data or using a 'set' constant profile.
+    year: float
+        Simulation year for determining generation array length.
+    
+    Class attributes
+    ---------------
+    pres: float
+        Outlet pressure from anaerobic digestion [bar].
+    temp: float
+        Outlet temperature from anaerobic digestion [C].
+    ef: float
+        Carbon intensity of biogas [kgCO2/MWh].
+    lcoe: float
+        Production cost for biogas [€/MWh].
+    
+    Methods
+    -------
+    None
+    
+    Notes
+    -----
+    None
     
     """
-    # Class variables
-    pres = 1 #bar
-    temp = 50 #C
-    ef = 50 #[gCO2/kWh]
-    lcoe = 65 #[€/MWh raw biogas]
+    pres = 1
+    temp = 50
+    ef = 50
+    lcoe = 65
 
     def __init__(self, data, year):
+        """        
+        Attributes
+        ----------
+        flow: array (8760/8784x2)
+            Hourly methane and CO2 production [mol/h].
+        min_co2: float
+            Minimum CO2 fraction in the biogas flow [fraction].
+            
+        """
         if data == "set":
             if year == 2020:
                 ch4_rate = np.zeros(8784) + (size*comp[0]) # Methane flow rate [mol/h]
@@ -476,7 +583,11 @@ class Biogas():
                 co2_rate = ch4_rate * (comp[1]/comp[0]) # Carbon dioxide flow rate [mol/h]
         elif data == "real":
             bg_read = r'C:\Users\enls0001\Anaconda3\Lib\site-packages\P2G\Data\Biogas flow.xlsx' # Reading data
-            bg_data = pd.read_excel(bg_read)
+            try:
+                bg_data = pd.read_excel(bg_read)
+            except FileNotFoundError:
+                print("Error: Biogas production directory not found or file does not exist. Set data variable to 'set' to use an arrbitrary demand and modify it within the Biogas class.")
+        
             ch4_rate = bg_data.iloc[:,0] # Methane flow rate [Nm3/h]
             co2_rate = bg_data.iloc[:,1] # Carbon dioxide flow rate [Nm3/h]
             nm3_to_mol = 0.022414 # Conversion factor from Nm3 to mol at 0 C and 1 atm for ideal gas
@@ -495,82 +606,240 @@ class Biogas():
 
 class Heat():
     """
+    Contains all heat related values, as well as hourly heat demand profiles.
+    
+    Parameters
+    ----------
+    data: str {'real', 'set'}
+        Determines production dataset, either from 'real' data or using a 'set' constant profile.
+    year: float
+        Simulation year for determining generation array length.
+    
+    Class attributes
+    ---------------
+    usable: float
+        Fraction of produced heat that can be utilized [fraction].
+    ems: float
+        Carbon intensity of replaced heat [kgCO2/MWh].
+    ems_marginal: float
+        Marginal carbon intensity of replaced heat [kgCO2/MWh].
+    scale: float
+        Scaling factor for real heat demand profile.
+    set_demand_tot: float
+        Value of set total heat demand at the WWTP [kW] (Edit this if no real demand profile is available).
+    set_demand_aux: float
+        Value of set auxiliary heat demand at the WWTP [kW] (Edit this if no real demand profile is available).
+    capex : float
+        Capital expenditure of heat integration system at reference size [€/kW].
+    capex_ref : float
+        Reference size for CAPEX [kWth].
+    opex : float
+        Operating expenditure [% of CAPEX].
+    scaling : float
+        CAPEX scaling factor.
+    piping_capex: float
+        Capital expenditure of heat piping [€/m].
+    dh_price: array (4x1)
+        District heating seasonal prices in the form [spring, summer, autumn, winter] [€/MWh].
+    
+    Methods
+    -------
+    None
+    
+    Notes
+    -----
+    None
     
     """
-    # Class variables
-    usable = 0.8 #heat exchanger efficiency (van der Roest et al. 2023)
-    ems = 112 #[gCO2/kWh]
-    ems_marginal = 30 #[gCO2/kWh]
+    usable = 0.8
+    ems = 112
+    ems_marginal = 30
     scale = 1
-    
-    capex = 260 #[€/kWth]
+    set_demand_tot = 500
+    set_demand_aux = 100
+    capex = 260
+    capex_ref = 400
     opex = 2
-    capex_ref = 400 #[kWth]
     scaling = 0.3
-    piping_capex = 230 #[€/m]
-    dh_price = np.array([35,22,35,53]) # [spring, summer, autumn, winter]
+    piping_capex = 230
+    dh_price = np.array([35,22,35,53])
 
-    def __init__(self, year):
-        #Read and process data
-        heat_read = r'C:\Users\enls0001\Anaconda3\Lib\site-packages\P2G\Data\Heat demand.xlsx'
-        total_heat = pd.read_excel(heat_read).iloc[:,0] * self.scale
-        digester_heat = pd.read_excel(heat_read).iloc[:,1] * self.scale
-        aux_heat = pd.read_excel(heat_read).iloc[:,2] * self.scale
-        if year == 2020:
-            total_heat = pd.concat([total_heat,total_heat.iloc[-24:]])
-            digester_heat = pd.concat([digester_heat,digester_heat.iloc[-24:]])
-            aux_heat = pd.concat([aux_heat,aux_heat.iloc[-24:]])
-        
-        self.demand_tot = np.array(total_heat)
-        self.demand_bg = np.array(digester_heat)
-        self.demand_aux = np.array(aux_heat)
-        return
+    def __init__(self, data, year):
+        """        
+        Attributes
+        ----------
+        demand_tot: array (8760/8784x1)
+            Hourly total heat demand [kW].
+        demand_bg: array (8760/8784x1)
+            Hourly sludge digestion heat demand [kW].
+        demand_aux: array (8760/8784x1)
+            Hourly auxiliary heat demand [kW].
+            
+        """
+        if data == 'real' or data == 'Real':
+            heat_read = r'C:\Users\enls0001\Anaconda3\Lib\site-packages\P2G\Data\Heat demand.xlsx'
+            try:
+                total_heat = pd.read_excel(heat_read).iloc[:,0] * self.scale
+                digester_heat = pd.read_excel(heat_read).iloc[:,1] * self.scale
+                aux_heat = pd.read_excel(heat_read).iloc[:,2] * self.scale
+            except FileNotFoundError:
+                print("Error: Heat demand directory not found or file does not exist. Set data variable to 'set' to use an arrbitrary demand and modify it within the Heat class.")
+            if year == 2020:
+                total_heat = pd.concat([total_heat,total_heat.iloc[-24:]])
+                digester_heat = pd.concat([digester_heat,digester_heat.iloc[-24:]])
+                aux_heat = pd.concat([aux_heat,aux_heat.iloc[-24:]])
+            self.demand_tot = np.array(total_heat)
+            self.demand_bg = np.array(digester_heat)
+            self.demand_aux = np.array(aux_heat)
+        elif data == 'set' or data == 'Set':
+            if year == 2020:
+                self.demand_tot = np.zeros(8784,) + self.set_demand_tot
+                self.demand_aux = np.zeros(8784,) + self.set_demand_aux
+                self.demand_bg = np.zeros(8784,) + self.set_demand_tot - self.demand_aux
+            else:
+                self.demand_tot = np.zeros(8760,) + self.set_demand_tot
+                self.demand_aux = np.zeros(8760,) + self.set_demand_aux
+                self.demand_bg = np.zeros(8760,) + self.set_demand_tot - self.demand_aux
         
 
 class Oxygen():
     """
+    Contains all heat related values, as well as hourly heat demand profiles.
+    
+    Parameters
+    ----------
+    data: str {'real', 'set'}
+        Determines production dataset, either from 'real' data or using a 'set' constant profile.
+    year: float
+        Simulation year for determining generation array length.
+    
+    Class attributes
+    ---------------
+    replacement: float
+        Reduction in flow rate for the aeration process.
+    sote_increase: float
+        Increase in oxygen transfer rate from pure oxygen use. 10 % increase is written 1.1.
+    aerator_air: float
+        Electricity consumption of conventional aeration [kWh/kgO2].
+    aerator_o2: float
+        Electricity consumption of pure oxygen aeration[kWh/kgO2].
+    aerator_savings: float
+        Electricity savings from pure oxygen use [kWh/kgO2].
+    scale: float
+        Scaling factor for real oxygen demand profile.
+    set_demand: float
+        Value of set oxygen demand at the WWTP [mol/h] (Edit this if no real demand profile is available).
+    aerator_capex : float
+        Capital expenditure of the pure oxygen aeration system at reference size [€/kW].
+    aerator_ref : float
+        Reference size for CAPEX [kW of electrolyzer capacity].
+    opex : float
+        Operating expenditure [% of CAPEX].
+    aerator_scaling : float
+        CAPEX scaling factor.
+    piping_capex: float
+        Capital expenditure of oxygen piping [€/m].
+    
+    Methods
+    -------
+    None
+    
+    Notes
+    -----
+    None
     
     """
     # Class variables
-    replacement = 100/21 #how much can we reduce the aeration flow by?
-    sote_increase = 1 #reduced o2 demand due to higher driving force, need to implement properly for costs if used as we're still replacing the same amount of air!
-    aerator_air = 1/17 #[kWh/kgO2]
-    aerator_o2 = aerator_air/(replacement) #[kWh/kgO2]
-    aerator_savings = (aerator_air - aerator_o2) * sote_increase #[kWh/kgO2] energy savings per kg pure O2
-    scale = 1 # Scale of demand
-    
-    piping_capex = 540 #[€/m]
-    aerator_capex = 70 #[€/kW electrolyzer]
-    aerator_ref = 1250 #[MWel]
+    replacement = 100/21 
+    sote_increase = 1
+    aerator_air = 1/17
+    aerator_o2 = aerator_air/(replacement)
+    aerator_savings = (aerator_air - aerator_o2) * sote_increase
+    scale = 1
+    set_demand = 100000
+    aerator_capex = 70
+    aerator_ref = 1250
     opex = 2 
     aerator_scaling = 0.6
+    piping_capex = 540
     
-    def __init__(self, year):
-        #Read and process data
-        o2_read = r'C:\Users\enls0001\Anaconda3\Lib\site-packages\P2G\Data\O2 flow.xlsx'
-        o2_data = pd.read_excel(o2_read).iloc[:,0] * self.scale
-        if year == 2020:
-            o2_data = pd.concat([o2_data,o2_data.iloc[-24:]])
+    def __init__(self, data, year):
+        """        
+        Attributes
+        ----------
+        demand: array (8760/8784x1)
+            Hourly oxygen demand [mol/h].
             
-        self.demand = np.array(o2_data)
+        """
+        if data == 'real' or data == 'Real':
+            o2_read = r'C:\Users\enls0001\Anaconda3\Lib\site-packages\P2G\Data\O2 flow.xlsx'
+            try:
+                o2_data = pd.read_excel(o2_read).iloc[:,0] * self.scale
+            except FileNotFoundError:
+                print("Error: Oxygen demand directory not found or file does not exist. Set data variable to 'set' to use an arrbitrary demand and modify it within the Oxygen class.")
+            if year == 2020:
+                o2_data = pd.concat([o2_data,o2_data.iloc[-24:]])
+            self.demand = np.array(o2_data)
+        elif data == 'set' or data == 'Set':
+            if year == 2020:
+                self.demand = np.zeros(8784,) + self.set_demand
 
 
 class TechnoEconomics():
     """
+    Contains all values related to techno-economic assessment, as well as KPI determination methods.
     
+    Parameters
+    ----------
+    hv: str {'hhv', 'lhv'}
+        Type of heating value used for techno-economic calculations.
+    lifetime: float
+        System lifetime [years].
+    discount: float
+        Discount rate [%].
     
+    Class attributes
+    ---------------
+    co2_cost: float
+        Cost of carbon dioxide [€/tCO2].
+    install_cost: float
+        Installation cost [% of total CAPEX].
+    piping_dist: float
+        Piping distance for heat and oxygen integration costs [m].
+    
+    Methods
+    -------
+    lcox(opex, capex, stack, prod, stack_reps, rep_years)
+        Returns the levelized cost of X, where X depends on the input data.
+    npv(self, opex, income, capex, stack, stack_reps, rep_years)
+        Returns the net present value.
+    emissions(self, aefs, mefs, wind_efs, pv_efs, grid, wind, pv, prod, heat_use, heat_aef, heat_mef, o2_use, bg_ef, flared)
+        Returns net specific emissions using boh average and marginal emission factors.
+    
+    Notes
+    -----
     LHV not fully implemented.
     
-    
     """
-    # Class variables
-    lifetime = 20 #years
-    discount = 8 #[%]
-    co2_cost = 0 #[€/tonCO2]
-    install_cost = 20 #[% of total CAPEX]
-    piping_dist = 1000 #[m]
+    co2_cost = 0
+    install_cost = 20
+    piping_dist = 1000
     
-    def __init__(self, hv):
+    def __init__(self, hv, lifetime, discount):
+        """        
+        Attributes
+        ----------
+        ch4_mol: float
+            HHV for methane on a molar basis [kWh/mol].
+        h2_kg: float
+            HHV for hydrogen on a mass basis [kWh/kg].
+        nm3_mol: float
+            Amount of normal cubic meters per mol of a gas [Nm3/mol].
+            
+        """
+        self.lifetime = lifetime
+        self.discount = discount
+        
         if hv == "HHV" or hv == "hhv":
             ch4_vol = 11.05 #kWh/Nm3
             ch4_kg = 15.44 #kWh/kg
@@ -583,20 +852,189 @@ class TechnoEconomics():
             self.ch4_mol = ch4_kg / (1000/16.04) #kWh/mol
             self.h2_kg = 33.3 #kWh/kg
             self.nm3_mol = self.ch4_mol / ch4_vol #Nm3/mol
+    
+    def lcox(self, opex, capex, stack, prod, stack_reps, rep_years):
+        """
+        Returns the levelized cost of X.
         
+        Parameters
+        ----------
+        opex: float
+            Total OPEX [€].
+        capex: float
+            Total CAPEX [€].
+        stack: float
+            Stack replacement cost [€].
+        prod: str
+            Amount of produced gas [MWh]
+        stack_reps: float
+            Number of stack replacements.
+        rep_years: array
+            The years when stack replacements take place.
+        
+        Returns
+        ---------------
+        lcox : float
+            Levelized cost of X [€/MWh].
+            
+        """
+        #Define total parameters
+        full_opex = 0
+        full_ch4 = 0
+        full_stack = 0
+        if stack_reps > 0: #Define stack replacement parameters
+            stack_cost = stack / stack_reps
+        else:
+            stack_cost = 0
+        for y in range(self.lifetime): #Total OPEX and CH4 production
+            full_opex = full_opex + (opex / pow(1 + (self.discount/100),y))
+            full_ch4 = full_ch4 + (prod / pow(1 + (self.discount/100),y))
+        for i in range(stack_reps): #Discounting stack replacements
+            full_stack = full_stack + (stack_cost / pow(1 + (self.discount/100),rep_years[i]))
+
+        lcox = (capex + full_opex + full_stack) / full_ch4
+        return lcox
+    
+    def npv(self, opex, income, capex, stack, stack_reps, rep_years):
+        """
+        Returns the net present value.
+        
+        Parameters
+        ----------
+        opex: float
+            Total OPEX [€].
+        income : float
+            Total annual income [€].
+        capex: float
+            Total CAPEX [€].
+        stack: float
+            Stack replacement cost [€].
+        stack_reps: float
+            Number of stack replacements.
+        rep_years: array
+            The years when stack replacements take place.
+        
+        Returns
+        ---------------
+        npv : float
+            Net present value [€].
+            
+        """
+        annual_flow = 0
+        total_stack = 0
+        if stack_reps > 0:
+            stack_cost = stack / stack_reps
+        else:
+            stack_cost = 0
+        for y in range(self.lifetime):
+            annual_flow = annual_flow + ((income-opex) / pow(1 + (self.discount/100),y))
+            
+        for i in range(stack_reps):
+            total_stack = total_stack + (stack_cost / pow(1 + (self.discount/100),rep_years[i]))
+            
+        npv = annual_flow - capex - total_stack
+        return npv
+    
+    def efficiencies(self, p2g_prod, tot_prod, heat_use, o2_use, el_cons, tot_heat, usable_heat):
+        """
+        Returns multiple efficiency values.
+
+        Parameters
+        ----------
+        p2g_prod : float
+            Methane production from the P2G system [MWh].
+        tot_prod : float
+            Total methane production [MWh].
+        heat_use : float
+            Total heat use [kWh].
+        o2_use : array
+            Hourly oxygen use [mol/h].
+        el_cons : float
+            Total electricity consumption of the P2G system [kWh].
+        tot_heat : float
+            Total heat production [kWh]
+        usable_heat : float
+            Usable heat fraction.
+
+        Returns
+        -------
+        aef_net : float
+            Net specific emissions based on average emission factors [kgCO2/MWhCH4].
+        tot_prod : float
+            Net specific emissions based on marginal emission factors [kgCO2/MWhCH4].
+        aef_avg : float
+            Average AEF used [kgCO2/MWhel].
+        o2_use : float
+            Average MEF used [kgCO2/MWhel].
+
+        """
+        n_gas = 100 * (p2g_prod * 1000) / el_cons # Efficiency of P2G system without by-products [%]
+        n_heat = 100 * ((p2g_prod * 1000) + heat_use) / el_cons # Including heat [%]
+        n_o2 = 100 * ((p2g_prod * 1000) + o2_use) / el_cons # Including oxygen [%]
+        n_tot = 100 * ((p2g_prod * 1000) + heat_use + o2_use) / el_cons # Including heat and oxygen [%]
+        n_biomethane = 100 * ((tot_prod * 1000) + heat_use + o2_use) / (el_cons + ((tot_prod-p2g_prod)*1000)) # Upgrading efficiency, including biomethane [%]
+        n_max = 100 * ((p2g_prod * 1000) + (tot_heat*usable_heat) + o2_use) / el_cons # Theoretical with all usable heat and oxygen [%]
+        n_theory = 100 * ((p2g_prod * 1000) + tot_heat + o2_use) / el_cons # Theoretical with all heat and oxygen [%]
+        
+        return n_gas, n_heat, n_o2, n_tot, n_biomethane, n_max, n_theory
+    
+    def emissions(self, aefs, mefs, wind_efs, pv_efs, grid, wind, pv, prod, heat_use, heat_aef, heat_mef, o2_use, bg_ef, flared):
+        
+        aef_ems = ((grid * aefs / 1000).sum() + (wind * wind_efs / 1000).sum() + (pv * pv_efs / 1000).sum()) / prod # Average emissions from electricity consumption without curtailment [kgCO2/MWhCH4]
+        mef_ems = ((grid * mefs / 1000).sum() + (wind * wind_efs / 1000).sum() + (pv * pv_efs / 1000).sum()) / prod # Marginal emissions from electricity consumption without curtailment [kgCO2/MWhCH4]
+        aef_avg = (aef_ems*prod) / ((grid / 1000).sum()) # Average AEF emissions from electricity consumption [kgCO2/MWhCH4]
+        mef_avg = (mef_ems*prod) / ((grid / 1000).sum()) # Average MEF emissions from electricity consumption [kgCO2/MWhCH4]
+        aef_ems_red_heat = (heat_use * heat_aef / 1000) / prod # Average mission reductions from heat use [kgCO2/MWhCH4]
+        mef_ems_red_heat = (heat_use * heat_mef/ 1000) / prod # Marginal mission reductions from heat use [kgCO2/MWhCH4]
+        # aef_ems_red_heat = ((heat_prod.sum() * heat_frac_use) * heat.ems / 1000) / ch4_p2g # [kgCO2/MWhCH4] (For assuming a fixed heat use fraction)
+        # mef_ems_red_heat = ((heat_prod.sum() * heat_frac_use) * heat.ems_marginal / 1000) / ch4_p2g # [kgCO2/MWhCH4] (For assuming a fixed heat use fraction)
+        aef_red_o2 = (o2_use * aefs).sum() / (1000*prod) # Average mission reductions from oxygen use [kgCO2/MWhCH4]
+        mef_red_o2 = (o2_use * mefs).sum() / (1000*prod) # Marginal mission reductions from oxygen use [kgCO2/MWhCH4]
+        bgloss_ems_increase = (bg_ef * flared * self.ch4_mol) / (1000*prod) # Emission increase from biogas losses [kgCO2/MWhCH4]
+        aef_net = aef_ems - aef_red_o2 - aef_ems_red_heat + bgloss_ems_increase # Net system climate impact [kgCO2/MWhCH4]
+        mef_net = mef_ems - mef_red_o2 - mef_ems_red_heat + bgloss_ems_increase # Net system climate impact [kgCO2/MWhCH4]
+        
+        return aef_net, mef_net, aef_avg, mef_avg
         
 class Grid():
-    """
-    
-    
+    """  
     Returns numpy arrays containing annual hourly electricity grid prices, and average and marginal hourly emission factors.
     
+    Parameters
+    ----------
+    year: float
+        Simulation year for determining generation array length.
+    zone: str {'SE1', 'SE2', 'SE3', 'SE4'}
+        Determines which Swedish electricity bidding zone prices and emissions to use.
+    
+    Class attributes
+    ---------------
+    fee: float
+        Grid fee which is added to the spot price [€/MWh].
+    
+    Methods
+    -------
+    None
+    
+    Notes
+    -----
+    None
     
     """
-    # Class variables
-    fee = 10 #€/MWh (only PV on-site?)
+    fee = 10 #€/MWh
     
     def __init__(self, year, zone):
+        """
+        Attributes
+        ----------
+        spot_price : array (8760/8784x1)
+            Hourly spot prices in the specified bidding zone and year [€/MWh].
+        aefs : array (8760/8784x1)
+            Hourly average emission factors in the specified bidding zone and year [kgCO2/MWh].
+        mefs : array (8760/8784x1)
+            Hourly marginal emission factors in the specified bidding zone and year [kgCO2/MWh].
+
+        """
         spot_read = r'C:\Users\enls0001\Anaconda3\Lib\site-packages\P2G\Data\Spot prices\elspot prices ' + str(year) + '.xlsx'
         spot_price = pd.read_excel(spot_read) + self.fee
         self.spot_price = np.array(spot_price[zone].tolist()) # Grid prices
@@ -605,187 +1043,4 @@ class Grid():
         efs = pd.read_excel(efs_read)
         self.aefs = np.array(efs.iloc[:,0])
         self.mefs = np.array(efs.iloc[:,1]) 
-    
-"""
-Functions providing annual hourly datasets.
-"""
-
-def biogas_plant(
-        data: str = "real",
-        size: float = 1,
-        comp: float = 1,
-        year: int = 2021):
-    """
-    Returns an array containing the hourly biogas plant outlet flow in mol/h.
-    
-    Parameters
-    ----------
-    data: str {'real', 'set'}
-        The input 'data' decides whether actual plant data should be imported ('real') or a constant flow be assumed ('set').
-    size: float [mol/h], optional
-        If 'data' is 'set', then a biogas plant size should be defined. This is done based on the hourly biogas flow in mol/h.
-    comp: list, optional
-        Furthermore, the biogas composition should be defined if 'data' is 'set'. This is done using a list of composition (fractions) in the following order: [CH4, CO2, etc.]
-    year: int
-        The simulation year is defined to determine the size of the output depending on the number of hours in a selected year.
-        
-    Returns
-    -------
-    biogas_flow: array [mol/h]
-        A NumPy array containing hourly values of CH4 and CO2 flows is returned in the order [CH4, CO2].
-    """
-    if data == "set":
-        if year == 2020:
-            ch4_rate = np.zeros(8784) + (size*comp[0]) # Methane flow rate [mol/h]
-            co2_rate = ch4_rate * (comp[1]/comp[0]) # Carbon dioxide flow rate [mol/h]
-        else:
-            ch4_rate = np.zeros(8760) + (size*comp[0]) # Methane flow rate [mol/h]
-            co2_rate = ch4_rate * (comp[1]/comp[0]) # Carbon dioxide flow rate [mol/h]
-    elif data == "real":
-        bg_read = r'C:\Users\enls0001\Anaconda3\Lib\site-packages\P2G\Data\Biogas flow.xlsx' # Reading data
-        bg_data = pd.read_excel(bg_read)
-        ch4_rate = bg_data.iloc[:,0] # Methane flow rate [Nm3/h]
-        co2_rate = bg_data.iloc[:,1] # Carbon dioxide flow rate [Nm3/h]
-        nm3_to_mol = 0.022414 # Conversion factor from Nm3 to mol at 0 C and 1 atm for ideal gas
-        ch4_rate = ch4_rate / nm3_to_mol # Methane flow rate [mol/h]
-        co2_rate = co2_rate / nm3_to_mol # Carbon dioxide flow rate [mol/h]
-        ch4_rate.replace(np.nan,0) # Assuming zero flow when no data is present
-        co2_rate.replace(np.nan,0) # Assuming zero flow when no data is present
-        if year == 2020:
-            ch4_rate = pd.concat([ch4_rate,ch4_rate.iloc[-24:]])
-            co2_rate = pd.concat([co2_rate,co2_rate.iloc[-24:]])
-            ch4_rate = ch4_rate.reset_index(drop=True)
-            co2_rate = co2_rate.reset_index(drop=True)
-    
-    biogas_flow = np.array([ch4_rate,co2_rate]).transpose()
-    
-    return biogas_flow
-
-
-def byprod_loads(
-        o2_scale: float = 1,
-        heat_scale: float = 1,
-        year: int = 2021):
-    """
-    Returns an array containing actual hourly heat and oxygen demands for the WWTP.
-    
-    Parameters
-    ----------
-    o2_scale: float
-        Scaling factor used for varying the size (but not shape) of the oxygen demand.
-    heat_scale: float
-        Scaling factor used for varying the size (but not shape) of the heat demand.
-    year: int
-        The simulation year is defined to determine the size of the output depending on the number of hours in a selected year.
-    
-    Returns
-    -------
-    oxygen: array [mol/h]
-        A full year of hourly oxygen demand values at the WWTP.
-    total_heat: array [kWh/h]
-        A full year of hourly overall heat demand values at the WWTP.
-    digester_heat: array [kWh/h]
-        A full year of hourly digester heat demand values at the WWTP.
-    aux_heat: array [kWh/h]
-        A full year of hourly auxiliary heat demand values at the WWTP.
-    
-    """
-    #Read and process data
-    o2_read = r'C:\Users\enls0001\Anaconda3\Lib\site-packages\P2G\Data\O2 flow.xlsx'
-    o2_data = pd.read_excel(o2_read).iloc[:,0] * o2_scale
-    heat_read = r'C:\Users\enls0001\Anaconda3\Lib\site-packages\P2G\Data\Heat demand.xlsx'
-    total_heat = pd.read_excel(heat_read).iloc[:,0] * heat_scale
-    digester_heat = pd.read_excel(heat_read).iloc[:,1] * heat_scale
-    aux_heat = pd.read_excel(heat_read).iloc[:,2] * heat_scale
-    if year == 2020:
-        o2_data = pd.concat([o2_data,o2_data.iloc[-24:]])
-        # o2_data = o2_data.append(o2_data.iloc[-24:])
-        # o2_data = o2_data.append(o2_data.iloc[-26])
-        total_heat = pd.concat([total_heat,total_heat.iloc[-24:]])
-        # total_heat = total_heat.append(total_heat.iloc[-24:])
-        # total_heat = total_heat.append(total_heat.iloc[-26])
-        digester_heat = pd.concat([digester_heat,digester_heat.iloc[-24:]])
-        # digester_heat = digester_heat.append(digester_heat.iloc[-24:])
-        # digester_heat = digester_heat.append(digester_heat.iloc[-26])
-        aux_heat = pd.concat([aux_heat,aux_heat.iloc[-24:]])
-        # aux_heat = aux_heat.append(aux_heat.iloc[-24:])
-        # aux_heat = aux_heat.append(aux_heat.iloc[-26])
-        o2_data = o2_data.reset_index(drop=True)
-        total_heat = total_heat.reset_index(drop=True)
-        aux_heat = aux_heat.reset_index(drop=True)
-        digester_heat = digester_heat.reset_index(drop=True)
-    
-    oxygen = np.array(o2_data)
-    total_heat = np.array(total_heat)
-    digester_heat = np.array(digester_heat)
-    aux_heat = np.array(aux_heat)
-    
-    return oxygen, total_heat, digester_heat, aux_heat
-
-
-def res_gen(
-        wind_size: float = 0.5,
-        pv_size: float = 0.5,
-        pv_degr: float = 0.0,
-        lifetime: int = 20,
-        year: float = 2021):
-    """
-    Returns an array containing hourly wind and PV generation values.
-    
-    Parameters
-    ----------
-    wind_size: float [MW]
-        Sets the rated wind capacity and scales the time series based on this.
-    pv_size: float [MW]
-        Sets the rated PV capacity and scales the time series based on this.
-    pv_degr: float [%/yr]
-        Annual degradation of the PV panel.
-    lifetime: int [years]
-        Lifetime of the PV system, used to estimated the average production considering panel degradation.
-    year: int
-        The simulation year is defined to determine the size of the output depending on the number of hours in a selected year.
-    
-    Returns
-    -------
-    wind_gen: array [kWh/h]
-        Annual wind generation with an hourly resolution.
-    pv_gen: array [kWh/h]
-        Annual PV generation with an hourly resolution.
-    """
-    wind_read = r'C:\Users\enls0001\Anaconda3\Lib\site-packages\P2G\Data\wind (Uppsala).xlsx' # Reading Excel data
-    pv_read = r'C:\Users\enls0001\Anaconda3\Lib\site-packages\P2G\Data\solar (Uppsala).xlsx'
-    if year == 2020:
-        wind_gen = np.array(pd.read_excel(wind_read) * (wind_size/3000))[0:8784,0] # Saving data
-        pv_gen = np.array(pd.read_excel(pv_read) * (pv_size/3000))[0:8784,0] 
-    else:
-        wind_gen = np.array(pd.read_excel(wind_read) * (wind_size/3000))[0:8760,0] # Removing last day
-        pv_gen = np.array(pd.read_excel(pv_read) * (pv_size/3000))[0:8760,0]
-    pv_gen = pv_gen * (1-(round(lifetime/2)*pv_degr/100)) # PV degradation
-    
-    return wind_gen, pv_gen
-
-
-def grid(
-        year: int = 2021,
-        zone: str = "SE3",
-        grid_fee: float = 10.0):
-    """
-    Returns numpy arrays containing annual hourly electricity grid prices, and average and marginal hourly emission factors.
-    
-    """
-    spot_read = r'C:\Users\enls0001\Anaconda3\Lib\site-packages\P2G\Data\Spot prices\elspot prices ' + str(year) + '.xlsx'
-    spot_price = pd.read_excel(spot_read) + grid_fee
-    spot_price = np.array(spot_price[zone].tolist()) # Grid prices
-    
-    efs_read = r'C:\Users\enls0001\Anaconda3\Lib\site-packages\P2G\Data\EFs\efs_' + str(zone) + '_' + str(year) + '.xlsx'
-    efs = pd.read_excel(efs_read)
-    aefs = np.array(efs.iloc[:,0])
-    mefs = np.array(efs.iloc[:,1])  
-    
-    return spot_price, aefs, mefs
-    
-    
-    
-    
-    
     

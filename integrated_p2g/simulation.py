@@ -11,7 +11,6 @@ import math
 import parameters as params
 import components as comps
 import other
-import kpis
 import dispatch
 import plotting
 import matplotlib.pyplot as plt
@@ -25,7 +24,20 @@ import seaborn as sns
 import time
 
 """
-Integrated power-to-gas model
+This is a model of an integrated power-to-gas (P2G) system, as described in <link to study when published>.
+
+This is the script from which simulations of the integrated P2G model can be conducted.
+The system consists of a PEM electrolyzer, compressed hydrogen storage and a methanation reactor.
+Capabilities for including a battery for storage of excess renweable generation has also been implemented.
+Electricity can be sourced from hte grid and directly coupled wind and solar energy.
+
+To run a simulation, define electrolyzer [MWel], storage [kgH2], methanation [MWCH4out] and battery [MWh] capacities in a list format.
+Include renewable generation by defining wind and PV oversizing factors (ratio to electrolyzer capacity, e.g. 2 for 10 MW with a 5 MW electrolyzer).
+To run an optimization, simply define multiple capacities for the components you wish to optimize in the list, separated by a comma (e.g. [1,2,3])
+Furthermore, define the simulation year (2018-2021) and the bidding zone (SE1 - SE4).
+Detailed process data can be saved be setting 'simulation_detals' to 'yes', and plots can be produced be setting 'plots' to 'yes'.
+
+Further changes to the input parameters can be made within the classes containing each component within the 'parameters.py' module.
 
 """
 
@@ -33,15 +45,11 @@ Integrated power-to-gas model
 """
 Comments on current version (1.0a):
 
-H2 STORAGE NOT DISCHARGING AT THE END OF EACH HOUR, PERHAPS REASON FOR ISSUES?    
+H2 storage not discharging at the end of each error, perhaps the reason behind issues?
 
-REDO SIMULATIONS
-    MAY HAVE DOUBLE-COUNTED CURTATAILED PV ABOVE 2X CAPACITY (PURE PV), TRY AND REDO
-    HAVE USED THE SAME 24 HOURS FOR COMPRESSION CONSUMPTION
-    HAVE USED A TOO HIGH VALUE FOR SPOT PRICE FROM GRID IN DISPATCH
 """
 
-start = time.time()
+# start = time.time()
 
 """ Optimization parameters """
 elz_size_vector = [8.5]#[6,6.5,7,7.5,8,8.5,9,9.5,10,10.5,11,11.5,12] # [MW]
@@ -54,18 +62,18 @@ bat_size_vector = [0] # [MWh]
 """ Simulation parameters """
 year = 2021 # 2018-2021 available
 bidding_zone = 'SE3' # ['SE1', 'SE2', 'SE3', 'SE4']
-simulation_details = 'yes' # ['Yes', 'No'] A "Process" dataframe with all process stages during all hours is created.
-plots = 'yes' # ['Yes', 'No']
+simulation_details = 'no' # ['Yes', 'No'] A "Process" dataframe with all process stages during all hours is created.
+plots = 'no' # ['Yes', 'No']
 
 """ Creating component classes for variable storage in components """
-tec = params.TechnoEconomics(hv='hhv') # Techno-economic parameters
+tec = params.TechnoEconomics(hv='hhv', lifetime=20, discount=8) # Techno-economic parameters
 biogas = params.Biogas(data='real', year=year) # Biogas production
 storage = params.Storage(storage_type='H2', size=0) # Hydrogen storage. Setting arbitrary sizes to be adjusted later within the optimization loop.
 bat = params.Storage(storage_type='Battery', size=0) # Battery storage. Not included in study.
 res = params.Renewables(wind_size=3000, pv_size=3000, year=year, lifetime=tec.lifetime) # Renewables (wind, PV). Assuming arbitrary sizes to be adjusted later within the optimization loop.
 grid = params.Grid(year=year, zone=bidding_zone) # Electricity grid parameters
-o2 = params.Oxygen(year=year) # Oxygen utilization system
-heat = params.Heat(year=year) # Heat utilization system
+o2 = params.Oxygen(year=year, data='real') # Oxygen utilization system
+heat = params.Heat(year=year, data='real') # Heat utilization system
 
 """ Define run-type """
 if len(elz_size_vector) == 1 and len(meth_scale_vector) == 1 and len(h2st_size_vector) == 1 and len(wind_size_vector) == 1 and len(pv_size_vector) == 1 and len(bat_size_vector) == 1:
@@ -118,10 +126,10 @@ for e in range(len(elz_size_vector)):
                         """ Initiate process simulation """
                         # Initial values for dynamic variables
                         h2_storage = 0
-                        elz_on = 0 #start in off mode
-                        elz_standby = 1 #assuming no cold start from initial start
+                        elz_on = 0 # Start in off mode
+                        elz_standby = 1 # Assuming no cold start from initial start
                         elz_off = 0
-                        prev_mode = 1 #assuming fast start for initial electrolyzer
+                        prev_mode = 1 # Assuming fast start for initial electrolyzer
                         bat_storage = 0
                         
                         # Creating variables for data saving
@@ -160,7 +168,7 @@ for e in range(len(elz_size_vector)):
                             # Daily dispatch optimization
                             elz_dispatch = dispatch.p2g_wwtp3(h2_dem=h2_demand_kg[i1:i2], heat_demand=heat.demand_tot[i1:i2], heat_value=heat.dh_price, usable_heat=heat.usable, meth_spec_heat=meth.spec_heat, o2_demand=o2.demand[i1:i2]*32/1000, o2_power=o2.aerator_savings, k_values=pem.k_values, m_values=pem.m_values, grid=grid.spot_price[i1:i2], wind=res.wind_gen, pv=res.pv_gen, elz_max=pem.size_degr, elz_min=pem.min_load*pem.size_degr, elz_eff=pem.n_sys, aux_cons=pem.aux_cons, meth_max=meth.size_mol*2.02*4/1000, meth_min=meth.min_load*meth.size_mol*4*2.02/1000, h2st_max=storage.size, h2st_prev=h2_storage, prev_mode=prev_mode, startup_cost=pem.start_cost, standby_cost=pem.standby_cost, bat_cap=bat.size, bat_eff=bat.eff, bat_prev=bat_storage, meth_el_factor=meth.spec_el, h2o_cons=pem.water_cons, temp=pem.temp, h2o_temp=pem.h2o_temp, biogas=biogas.flow[i1:i2], comp_el_factor=bg_comp.spec_el, elz_startup_time=pem.start_time/60)# wind_cost=wind_lcoe, pv_cost=pv_lcoe)
                                    
-                            #Save daily data
+                            # Save daily data
                             electrolyzer[i1:i2] = elz_dispatch.iloc[:,0]
                             wind_use[i1:i2] = elz_dispatch.iloc[:,2]
                             pv_use[i1:i2] = elz_dispatch.iloc[:,3]
@@ -193,7 +201,7 @@ for e in range(len(elz_size_vector)):
                                 else:
                                     starts[i] = 0                            
                         
-                        #Hydrogen production
+                        # Hydrogen production
                         h2_flow, elz_heat, T_h2_out, o2_flow, h2o_cons, stack_eff, sys_eff, elz_heat_nonnet = comps.electrolyzer(dispatch=electrolyzer, prod=h2_production, aux=pem.aux_cons, temp=pem.temp, h2o_temp=pem.h2o_temp, heat_time=pem.heatup_time, startups=starts, h2o_cons=pem.water_cons, year=year)
                         h2st_in = np.maximum(0,h2_production-h2_used) * 1000 / 2.02
                         h2st_out = np.maximum(0,h2_used-h2_production) * 1000 / 2.02
@@ -206,12 +214,12 @@ for e in range(len(elz_size_vector)):
                         flared_gas = biogas.flow[:,0].T * abs(np.around((1-p2g_frac),6)) # Amount of non-upgraded, and thus flared, biomethane
                         
                         # Biogas compression (flow rate in; compressor power)
-                        bg_comp_power = comps.compressor(flow=biogas_in.sum(axis=0), temp_in=biogas.temp, p_in=biogas.pres, p_out=meth.pres, n_isen=bg_comp.n_isen, n_motor=bg_comp.n_motor, year=year) #[kWh]
+                        bg_comp_power = comps.compressor(flow=biogas_in.sum(axis=0), temp_in=biogas.temp, p_in=biogas.pres, p_out=meth.pres, n_isen=bg_comp.n_isen, n_motor=bg_comp.n_motor, year=year, N=bg_comp.N, z=bg_comp.z, k=bg_comp.k) #[kWh]
 
                         # Gas mixing (Biogas, hydrogen, temp in; total flow and temp out)
                         inlet_flow, T_inlet = comps.mixer(h2=h2_meth, co2=biogas_in[1], ch4=biogas_in[0], h2_temp=pem.temp, bg_temp=biogas.temp)
 
-                        #Methanation (molar flows, temp. in; molar flows, electricity consumption, excess heat, condensed water and microbial CO2 consumption out)
+                        # Methanation (molar flows, temp. in; molar flows, electricity consumption, excess heat, condensed water and microbial CO2 consumption out)
                         meth_outlet_flow, meth_power, meth_heat, h2o_cond1, microbial_co2 = comps.methanation(meth_flow=inlet_flow, T=meth.temp, T_in=T_inlet, el_cons=meth.el_cons, n=meth.n, microb_cons=meth.microb_cons)
 
                         if simulation_details == 'Yes' or simulation_details == 'yes': # Storing detailed results
@@ -354,12 +362,10 @@ for e in range(len(elz_size_vector)):
                         o2_loss = np.maximum(o2_flow - o2_wwtp,0).sum()
                         o2_use_frac = (o2_wwtp.sum() / o2_flow.sum()) * 100
                         o2_wwtp_use_frac = (o2_wwtp.sum() / o2.demand.sum()) * 100
-                        o2_energy_savings = o2.aerator_savings * o2_wwtp.sum() * 32 / 1000 #[kWh]
+                        o2_energy_savings = o2.aerator_savings * o2_wwtp * 32 / 1000 #[kWh]
                         # o2_energy_frac = 100 * o2_energy_savings / electrolyzer.sum() # % of electrolyzer energy input saved
 
                         """ Economic analysis """
-                        #Should also move to separate script?
-
                         # Electricity costs
                         if bat.size > 0:
                             wind_cost = ((wind_use+bat_in_wind) * (res.wind_lcoe + grid.fee)).sum() / 1000 # Wind via PPA
@@ -372,7 +378,7 @@ for e in range(len(elz_size_vector)):
                         startup_costs = (pem.size_degr * pem.start_cost * grid.spot_price * starts / 1000).sum()
                         el_cost = wind_cost + pv_cost + grid_cost + startup_costs
                         el_cost_curt = (el_cost + curt_cost) 
-                        #Averages
+                        # Averages
                         # avg_grid_price = grid_cost * 1000 / process['Grid use [kWh/h]'].sum() # [€/MWh]
                         # avg_tot_price = el_cost_curt * 1000 / process['System dispatch [kWh/h]'].sum() # [€/MWh]
                         # avg_el_ch4 = el_cost_curt / ch4_p2g # [€/MWh]
@@ -450,58 +456,20 @@ for e in range(len(elz_size_vector)):
                         """ KPI calculations """
 
                         # Economic KPIs
-                        # if pem.stack_rep > 1000: #hours
-                            # if stack_reps == 1:
-                            #     rep_years = np.array([(math.ceil(pem.stack_rep/elz_flh))])
-                            # elif stack_reps == 2:
-                            #     rep_years = np.array([(math.ceil(pem.stack_rep/elz_flh)), (math.ceil(2*pem.stack_rep/elz_flh))])
-                            # elif pem.stack_reps == 3:
-                            #     rep_years = np.array([(math.ceil(pem.stack_rep/elz_flh)), (math.ceil(2*pem.stack_rep/elz_flh)), (math.ceil(3*pem.stack_rep/elz_flh))])
-                        # else:
-                        # if stack_reps == 1:
-                        #     rep_years = np.array([pem.stack_rep])
-                        # elif stack_reps == 2:
-                        #     rep_years = np.array([pem.stack_rep, pem.stack_rep*2])
-                        # elif stack_reps == 3:
-                        #     rep_years = np.array([pem.stack_rep, pem.stack_rep*2, pem.stack_rep*3])
-                        # elif stack_reps == 0:
-                        #     rep_years = np.array([0])
-                        
-                        # lcoe = kpis.lcoe(opex=OPEX-by_income, capex=CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) # Levelized cost of energy [€/MWh of CH4P2G]
-
-                        # Net present value
-                        # income_gas = by_income + (gas_price * ch4_p2g) #[€] Income including gas sales
-                        # npv = kpis.npv(opex=OPEX_tot, income=income_gas, capex=CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, stack_reps=stack_reps, rep_years=rep_years) #[€]
-                        lcop2g = kpis.lcoe(opex=OPEX_tot-by_income, capex=CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) # Levelized cost of power-to-gas [€/MWh of CH4]
-                        lcop2g_curt = kpis.lcoe(opex=OPEX_tot_curt-by_income, capex=CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) # Levelized cost of power-to-gas including curtailment cost [€/MWh of CH4]
-
-                        #Minimum selling price
-                        lcom = kpis.lcoe(opex=OPEX_msp-by_income, capex=CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        lcom_no_curt = kpis.lcoe(opex=OPEX_msp_nocurt-by_income, capex=CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        
-                        #Comparison to amine scrubbing
-                        # amine_flow_rate = 1200 #[Nm3/hr]
-                        # amine_scrubber_CAPEX = 2300 * amine_flow_rate #[€]
-                        # amine_scrubber_el_cost = sum((process['CH4 out [mol/h]'] - process['Meth CH4 in [mol/h]']) * tec.nm3_mol * 0.1 * grid.spot_price / 1000) #[€]
-                        # amine_scrubber_heat_cost = sum((process['CH4 out [mol/h]'] - process['Meth CH4 in [mol/h]']) * tec.nm3_mol * 0.6 * np.mean(heat.dh_price) / 1000) #[€]
-                        # amine_scrubber_opex_fix = amine_scrubber_CAPEX * 0.05
-                        # amine_scrubber_OPEX = amine_scrubber_el_cost + amine_scrubber_heat_cost + amine_scrubber_opex_fix
-                        # npv_rep = kpis.npv(opex=OPEX_tot-amine_scrubber_OPEX, income=INCOME_GAS, capex=CAPEX-amine_scrubber_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, stack_reps=stack_reps, rep_years=rep_years) #[€]
-                        # lcoe_amine = kpis.lcoe(opex=amine_scrubber_OPEX, capex=amine_scrubber_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_total-ch4_p2g, stack_reps=0, rep_years=0) #[€/MWh of CH4]
-                        # lcom_amine = kpis.lcoe(opex=amine_scrubber_OPEX+biogas_cost_tot, capex=amine_scrubber_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_total-ch4_p2g, stack_reps=0, rep_years=0) #[€/MWh of CH4]
-
-                        #By-product analysis
-                        npv_o2 = kpis.npv(opex=o2_integration_OPEX, income=o2_income, capex=o2_integration_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, stack_reps=0, rep_years=rep_years) #[€]
-                        npv_heat = kpis.npv(opex=heat_integration_OPEX, income=heat_income, capex=heat_integration_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, stack_reps=0, rep_years=rep_years) #[€]
-                        # lcop2g_noo2 = kpis.lcoe(opex=OPEX_tot-heat_income-o2_integration_OPEX, capex=CAPEX-o2_integration_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        # lcop2g_noo2_curt = kpis.lcoe(opex=OPEX_tot_curt-heat_income-o2_integration_OPEX, capex=CAPEX-o2_integration_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        lcom_noo2_curt = kpis.lcoe(opex=OPEX_msp-heat_income-o2_integration_OPEX, capex=CAPEX-o2_integration_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        # lcop2g_noheat = kpis.lcoe(opex=OPEX_tot-o2_income-heat_integration_OPEX, capex=CAPEX-heat_integration_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        lcop2g_noheat_curt = kpis.lcoe(opex=OPEX_tot_curt-o2_income-heat_integration_OPEX, capex=CAPEX-heat_integration_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        # lcom_noheat_curt = kpis.lcoe(opex=OPEX_msp-o2_income-heat_integration_OPEX, capex=CAPEX-heat_integration_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        # lcop2g_nobys = kpis.lcoe(opex=OPEX_tot-o2_integration_OPEX-heat_integration_OPEX, capex=CAPEX-o2_integration_CAPEX-heat_integration_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        lcop2g_nobys_curt = kpis.lcoe(opex=OPEX_tot_curt-o2_integration_OPEX-heat_integration_OPEX, capex=CAPEX-o2_integration_CAPEX-heat_integration_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
-                        # lcom_nobys_curt = kpis.lcoe(opex=OPEX_msp-o2_integration_OPEX-heat_integration_OPEX, capex=CAPEX-o2_integration_CAPEX-heat_integration_CAPEX, stack=H2_STACK, dr=tec.discount, lt=tec.lifetime, ch4=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        # Levelized costs
+                        lcop2g = tec.lcox(opex=OPEX_tot-by_income, capex=CAPEX, stack=H2_STACK, prod=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) # Levelized cost of power-to-gas [€/MWh of CH4]
+                        lcop2g_curt = tec.lcox(opex=OPEX_tot_curt-by_income, capex=CAPEX, stack=H2_STACK, prod=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) # Levelized cost of power-to-gas including curtailment cost [€/MWh of CH4]
+                        lcom = tec.lcox(opex=OPEX_msp-by_income, capex=CAPEX, stack=H2_STACK, prod=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        lcom_no_curt = tec.lcox(opex=OPEX_msp_nocurt-by_income, capex=CAPEX, stack=H2_STACK, prod=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        # lcop2g_noo2 = tec.lcox(opex=OPEX_tot-heat_income-o2_integration_OPEX, capex=CAPEX-o2_integration_CAPEX, stack=H2_STACK, prod=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        lcop2g_noo2_curt = tec.lcox(opex=OPEX_tot_curt-heat_income-o2_integration_OPEX, capex=CAPEX-o2_integration_CAPEX, stack=H2_STACK, prod=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        # lcom_noo2_curt = tec.lcox(opex=OPEX_msp-heat_income-o2_integration_OPEX, capex=CAPEX-o2_integration_CAPEX, stack=H2_STACK, prod=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        # lcop2g_noheat = tec.lcox(opex=OPEX_tot-o2_income-heat_integration_OPEX, capex=CAPEX-heat_integration_CAPEX, stack=H2_STACK, prod=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        lcop2g_noheat_curt = tec.lcox(opex=OPEX_tot_curt-o2_income-heat_integration_OPEX, capex=CAPEX-heat_integration_CAPEX, stack=H2_STACK, prod=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        # lcom_noheat_curt = tec.lcox(opex=OPEX_msp-o2_income-heat_integration_OPEX, capex=CAPEX-heat_integration_CAPEX, stack=H2_STACK, prod=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        # lcop2g_nobys = tec.lcox(opex=OPEX_tot-o2_integration_OPEX-heat_integration_OPEX, capex=CAPEX-o2_integration_CAPEX-heat_integration_CAPEX, stack=H2_STACK, prod=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        lcop2g_nobys_curt = tec.lcox(opex=OPEX_tot_curt-o2_integration_OPEX-heat_integration_OPEX, capex=CAPEX-o2_integration_CAPEX-heat_integration_CAPEX, stack=H2_STACK, prod=ch4_p2g, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
+                        # lcom_nobys_curt = tec.lcox(opex=OPEX_msp-o2_integration_OPEX-heat_integration_OPEX, capex=CAPEX-o2_integration_CAPEX-heat_integration_CAPEX, stack=H2_STACK, prod=ch4_total, stack_reps=stack_reps, rep_years=rep_years) #[€/MWh of CH4]
                         # lcop2g_diff = lcop2g_nobys - lcop2g
                         # lcop2g_diff_curt = lcop2g_nobys_curt - lcop2g_curt
                         # lcom_diff_curt = msp_nobys_curt - lcom
@@ -511,34 +479,30 @@ for e in range(len(elz_size_vector)):
                         # lcop2g_diff_rel_o2 = (lcop2g-lcop2g_noheat) / lcop2g
                         # lcop2g_diff_rel_o2_curt = (lcop2g_curt-lcop2g_noheat_curt) / lcop2g_curt
                         # lcom_diff_rel_o2_curt = (lcom-msp_noheat_curt) / lcom
-
-                        # Technical KPIs
-                        tot_energy_cons = (electrolyzer + bg_comp_power + meth_power + (electrolyzer_standby*pem.standby_el)).sum() # System energy consumption [kWh]
-                        #Methane/Electricity
-                        n_gas = 100 * (ch4_p2g * 1000) / tot_energy_cons # Efficiency of P2G system without by-products [%]
-                        n_heat = 100 * ((ch4_p2g * 1000) + sum(heat_wwtp)) / tot_energy_cons # Including heat [%]
-                        n_o2 = 100 * ((ch4_p2g * 1000) + o2_energy_savings) / tot_energy_cons # Including oxygen [%]
-                        n_tot = 100 * ((ch4_p2g * 1000) + sum(heat_wwtp) + o2_energy_savings) / tot_energy_cons # Including heat and oxygen [%]
-                        n_biomethane = 100 * ((ch4_total * 1000) + sum(heat_wwtp) + o2_energy_savings) / (tot_energy_cons + ((ch4_total-ch4_p2g)*1000)) # Upgrading efficiency, including biomethane [%]
-                        n_max_tot = 100 * ((ch4_p2g * 1000) + ((elz_heat + meth_heat).sum()*heat.usable) + o2_energy_savings) / tot_energy_cons # Theoretical with all usable heat and oxygen [%]
-                        n_theory_heat = 100 * ((ch4_p2g * 1000) + (elz_heat + meth_heat).sum()) / tot_energy_cons # Theoretical with all heat [%]
-                        n_theory_tot = 100 * ((ch4_p2g * 1000) + (elz_heat + meth_heat).sum() + o2_energy_savings) / tot_energy_cons # Theoretical with all heat and oxygen [%]
                         
-                        # Environmental KPIs
-                        aef_ems = ((grid_use * grid.aefs / 1000).sum() + (wind_use * res.wind_efs / 1000).sum() + (pv_use * res.pv_efs / 1000).sum()) / ch4_p2g # Average emissions from electricity consumption without curtailment [kgCO2/MWhCH4]
-                        mef_ems = ((grid_use * grid.mefs / 1000).sum() + (wind_use * res.wind_efs / 1000).sum() + (pv_use * res.pv_efs / 1000).sum()) / ch4_p2g # Marginal emissions from electricity consumption without curtailment [kgCO2/MWhCH4]
-                        aef_avg = (aef_ems*ch4_p2g) / ((grid_use / 1000).sum()) # Average AEF emissions from electricity consumption [kgCO2/MWhCH4]
-                        mef_avg = (mef_ems*ch4_p2g) / ((grid_use / 1000).sum()) # Average MEF emissions from electricity consumption [kgCO2/MWhCH4]
-                        aef_ems_red_heat = (sum(heat_wwtp) * heat.ems / 1000) / ch4_p2g # Average mission reductions from heat use [kgCO2/MWhCH4]
-                        mef_ems_red_heat = (sum(heat_wwtp) * heat.ems_marginal / 1000) / ch4_p2g # Marginal mission reductions from heat use [kgCO2/MWhCH4]
-                        # aef_ems_red_heat = ((heat_prod.sum() * heat_frac_use) * heat.ems / 1000) / ch4_p2g # [kgCO2/MWhCH4] (For assuming a fixed heat use fraction)
-                        # mef_ems_red_heat = ((heat_prod.sum() * heat_frac_use) * heat.ems_marginal / 1000) / ch4_p2g # [kgCO2/MWhCH4] (For assuming a fixed heat use fraction)
-                        aef_red_o2 = ((o2.aerator_savings * o2_wwtp * 32 / 1000) * grid.aefs).sum() / (1000*ch4_p2g) # Average mission reductions from oxygen use [kgCO2/MWhCH4]
-                        mef_red_o2 = ((o2.aerator_savings * o2_wwtp * 32 / 1000) * grid.mefs).sum() / (1000*ch4_p2g) # Marginal mission reductions from oxygen use [kgCO2/MWhCH4]
-                        bgloss_ems_increase = (biogas.ef * flared_gas.sum() * tec.ch4_mol) / (1000*ch4_p2g) # Emission increase from biogas losses [kgCO2/MWhCH4]
-                        aef_net = aef_ems - aef_red_o2 - aef_ems_red_heat + bgloss_ems_increase # Net system climate impact [kgCO2/MWhCH4]
-                        mef_net = mef_ems - mef_red_o2 - mef_ems_red_heat + bgloss_ems_increase # Net system climate impact [kgCO2/MWhCH4]
-                            
+                        # Net present values
+                        # income_gas = by_income + (gas_price * ch4_p2g) #[€] Income including gas sales
+                        # npv = tec.npv(opex=OPEX_tot, income=income_gas, capex=CAPEX, stack=H2_STACK, stack_reps=stack_reps, rep_years=rep_years) #[€]
+                        npv_o2 = tec.npv(opex=o2_integration_OPEX, income=o2_income, capex=o2_integration_CAPEX, stack=0, stack_reps=0, rep_years=rep_years) #[€]
+                        npv_heat = tec.npv(opex=heat_integration_OPEX, income=heat_income, capex=heat_integration_CAPEX, stack=0, stack_reps=0, rep_years=rep_years) #[€]
+                        
+                        # Comparison to amine scrubbing
+                        # amine_flow_rate = 1200 #[Nm3/hr]
+                        # amine_scrubber_CAPEX = 2300 * amine_flow_rate #[€]
+                        # amine_scrubber_el_cost = sum((process['CH4 out [mol/h]'] - process['Meth CH4 in [mol/h]']) * tec.nm3_mol * 0.1 * grid.spot_price / 1000) #[€]
+                        # amine_scrubber_heat_cost = sum((process['CH4 out [mol/h]'] - process['Meth CH4 in [mol/h]']) * tec.nm3_mol * 0.6 * np.mean(heat.dh_price) / 1000) #[€]
+                        # amine_scrubber_opex_fix = amine_scrubber_CAPEX * 0.05
+                        # amine_scrubber_OPEX = amine_scrubber_el_cost + amine_scrubber_heat_cost + amine_scrubber_opex_fix
+                        # npv_rep = tec.npv(opex=OPEX_tot-amine_scrubber_OPEX, income=INCOME_GAS, capex=CAPEX-amine_scrubber_CAPEX, stack=H2_STACK, stack_reps=stack_reps, rep_years=rep_years) #[€]
+                        # lcoe_amine = kpis.lcoe(opex=amine_scrubber_OPEX, capex=amine_scrubber_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_total-ch4_p2g, stack_reps=0, rep_years=0) #[€/MWh of CH4]
+                        # lcom_amine = kpis.lcoe(opex=amine_scrubber_OPEX+biogas_cost_tot, capex=amine_scrubber_CAPEX, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_total-ch4_p2g, stack_reps=0, rep_years=0) #[€/MWh of CH4]
+                        
+                        # Efficiencies
+                        tot_energy_cons = (electrolyzer + bg_comp_power + meth_power + (electrolyzer_standby*pem.standby_el)).sum() # System energy consumption [kWh]
+                        n_gas, n_heat, n_o2, n_tot, n_biomethane, n_max, n_theory = tec.efficiencies(p2g_prod=ch4_p2g, tot_prod=ch4_total, heat_use=heat_wwtp.sum(), o2_use=o2_energy_savings.sum(), el_cons=tot_energy_cons, tot_heat=(elz_heat + meth_heat).sum(), usable_heat=heat.usable)
+                        # Emissions
+                        aef_net, mef_net, __, __ = tec.emissions(aefs=grid.aefs, mefs=grid.mefs, wind_efs=res.wind_efs, pv_efs=res.pv_efs, grid=grid_use, wind=wind_use, pv=pv_use, prod=ch4_p2g, heat_use=heat_wwtp.sum(), heat_aef=heat.ems, heat_mef=heat.ems_marginal, o2_use=o2_energy_savings, bg_ef=biogas.ef, flared=flared_gas.sum())
+                           
                         if run_type == "optimization":
                             results['E: {}, M: {}, S: {}, W: {}, P: {}, B: {}'.format(pem.size/1000,meth.size/1000,storage.size,wind_size/1000,pv_size/1000,bat.size)] = [lcop2g_curt, lcop2g, lcom, lcom_no_curt, lcoe, n_gas, n_tot, n_heat_o2, aef_net, mef_net, sum(starts), sum(electrolyzer_standby), elz_flh, flare_frac, o2_use_frac, o2_wwtp_use_frac, heat_use_frac, heat_wwtp_use_frac, res_frac, lcop2g_diff_curt, lcop2g_diff_rel_curt, msp_diff_curt, msp_diff_rel_curt, npv_o2, npv_heat] #Saving optimization results
                             count = count + 1 # Counting simulations
@@ -564,8 +528,6 @@ for e in range(len(elz_size_vector)):
                             # heat_income_lcoe = kpis.lcoe(opex=-heat_income, capex=0, stack=0, dr=tec.discount, lt=tec.lifetime, ch4=ch4_p2g, stack_reps=0, rep_years=0) * 100 / total #[€/MWh of CH4]
                             # cost_breakdown['{} MW'.format(elz_size)] = [elz_lcoe,stack_rep_lcoe,water_lcoe,h2st_lcoe,meth_lcoe,comp_lcoe,heat_lcoe,o2_lcoe,install_lcoe,bg_loss_lcoe,grid_lcoe,pv_lcoe1,wind_lcoe1,curt_lcoe1,o2_income_lcoe,heat_income_lcoe,lcop2g_curt] # Table
 
-# Save KPIS in a dictionary instead? And print that?
-
 """ Printing and plotting simulation results """
 if run_type == "single":
     # Print tables with main KPIs
@@ -579,422 +541,16 @@ if run_type == "single":
     
     # Plotting
     if plots == 'Yes' or plots == 'yes':        
-        __ = plotting.dispatch()
+        plotting.dispatch(electrolyzer=electrolyzer, elz_size_degr=elz_size_degr, h2_flow=h2_flow, elz_h2_max=elz_h2_max, h2_storage=(h2_storage_list/(storage.size))*100, spot_price=grid.spot_price, biogas_flow=biogas.flow, \
+                     h2_demand=h2_demand, h2_used=h2_used, heat_demand_tot=heat_demand_tot, meth_heat=meth_heat, usable_heat=heat.usable, elz_heat=elz_heat, o2_wwtp=o2_wwtp, o2_flow=o2_flow)
         
-        __ = plotting.byprods()
+        # plotting.byprods() # Not implemented yet
         
-        __ = plotting.sankey()
+        plotting.sankey(grid_use=grid_use, pv_use=pv_use, wind_use=wind_use, bat_in_pv=bat_in_pv, bat_in_wind=bat_in_wind, electrolyzer=electrolyzer, biogas_in=biogas_in, ch4_mol=tec.ch4_mol, bg_comp_power=bg_comp_power, h2_used=h2_used, h2_kg=tec.h2_kg, \
+                   flared=flared_gas, meth_el=meth_power, elz_heat_nonnet=elz_heat_nonnet, meth_heat=meth_heat, ch4_total=ch4_total, heat_wwtp=heat_wwtp, o2_energy_savings=o2_energy_savings, aerator_savings=o2.aerator_savings, o2_loss=o2_loss)
     
     
     # End time
-    end = time.time()
-    total_time = end - start
-    print('Time: ' + str(total_time))
-    
-    
-    #Dispatch 
-    #For poster
-    # x1 = 2301+48#500 #starting hour
-    # x2 = x1+24#600 #one week later
-    # d1 = x1 - x1%24 + 24 #start of the first new day
-    # elzload_plot = (h2_flow[x1:x2]*2.02/1000)*100/elz_h2_max
-    # h2st_plot = np.array(process['H2 storage [%]'][x1:x2])
-    # ep_plot = grid.spot_price[x1:x2]
-    # h2dem_plot = (h2_demand[x1:x2]*2.02/1000)*100 / elz_h2_max
-    # o2prod_plot = np.array(process['O2 out [mol/h]'][x1:x2] / 1000)
-    # x = range(0,x2-x1)
-    
-    # fig, ax1 = plt.subplots()
-    # l1 = ax1.plot(x,elzload_plot, color='steelblue', label='Electrolyser')
-    # l2 = ax1.fill_between(x,h2st_plot, color='lightskyblue', label='Hydrogen storage')
-    # ax3 = ax1.twinx()
-    # l3 = ax3.plot(x,ep_plot, color='darkorange', label='Electricity price')
-    # l4 = ax1.plot(x,h2dem_plot, color='seagreen', label='H$_2$ demand')
-    # ax1.set_xlabel('Hour')
-    # ax1.set_ylabel('Load [%]', color='k')
-    # ax3.set_ylabel('El. price [€/MWh]', color='darkorange')
-    # # lns = l1+l2+l3+l4
-    # # labs = [l.get_label() for l in lns]
-    # # ax1.legend(lns, labs, loc='upper left')
-    # #Indicating days
-    # # for i in range(math.floor((x2-x1)/24)):
-    # #     if d1 == x1:
-    # #         if i % 2 == 1:
-    # #             ax1.axvspan(d1-x1+(24*i),d1-x1+((24*(i+1))-1), facecolor='0.2', alpha=0.2, zorder=-1)
-    # #     elif d1 != x1:
-    # #         if i % 2 == 0:
-    # #             ax1.axvspan(d1-x1+(24*i),d1-x1+((24*(i+1))-1), facecolor='0.2', alpha=0.2, zorder=-1)
-    # # ax3.set_ylim(0,20000)
-    # ax1.set_ylim(0,110)
-    # ax3.set_ylim(0,110)
-    # ax1.set_xlim(0,x2-x1-1)
-    # plt.show()
-    
-    # #DEMAND AND SUPPLY MISMATCH AT LOWER LOADS, LIKELY DUE TO NOT CONSIDERING PART-LOAD EFFICIENCY
-    
-    
-    
-    # 
-    #Emission bar chart
-    # p2g_bar = [220.6, 48.6, 1511.4, 51.4]
-    # p2g_heat_bar = [-4.1, -21.9, -6.9, 7.1]
-    # p2g_o2_bar = [1.5, -0.3, -10.1, 0.6]
-    # p2g_total_bar = [218.0, 26.4, 1494.1, 59.1]
-    
-    # #Relative values
-    # p2g_bar = [100,100,100] #[LCOP2G, emissions, efficiency]
-    # p2g_heat_bar = [-2,-44.6,13.5]
-    # p2g_o2_bar = [1,-0.6,1.2]
-    # p2g_total_bar = [99,54.8,114.7]
-    
-    # data = np.array([p2g_bar, p2g_heat_bar, p2g_o2_bar])
-
-    # data_shape = np.shape(data)
-
-    # # Take negative and positive data apart and cumulate
-    # def get_cumulated_array(data, **kwargs):
-    #     cum = data.clip(**kwargs)
-    #     cum = np.cumsum(cum, axis=0)
-    #     d = np.zeros(np.shape(data))
-    #     d[1:] = cum[:-1]
-    #     return d  
-
-    # cumulated_data = get_cumulated_array(data, min=0)
-    # cumulated_data_neg = get_cumulated_array(data, max=0)
-
-    # # Re-merge negative and positive data.
-    # row_mask = (data<0)
-    # cumulated_data[row_mask] = cumulated_data_neg[row_mask]
-    # data_stack = cumulated_data
-
-    # cols = ["gray", "indianred", "slateblue"]
-    
-    # fig = plt.figure()
-    # ax = plt.subplot(111)
-
-    # for i in np.arange(0, data_shape[0]):
-    #     ax.bar(np.arange(data_shape[1]), data[i], bottom=data_stack[i], color=cols[i], width=0.6)
-        
-    # ax.plot([0,1,2], p2g_total_bar, marker='o', lw=0, color='k', markersize=7)
-    
-    # plt.xticks([0,1,2], ['LCOP2G', 'CO$_2$ emissions', 'Efficiency'], fontweight='bold')
-    # plt.axhline(y=0,linewidth=0.5, color='k')
-    # p2g_patch = mpatches.Patch(color='gray', label='P2G system', linewidth=0)
-    # heat_patch = mpatches.Patch(color='indianred', label='Heat', alpha=0.5, linewidth=0)
-    # o2_patch = mpatches.Patch(color='slateblue', label='Oxygen', alpha=0.5, linewidth=0)
-    # #grid_patch = mpatches.Patch(color='darkorange', label='Grid purchases', linewidth=0)
-    # net_patch = lines.Line2D([0], [0], color='k', lw=0, marker='o', label='Net value')
-    # legend = fig.legend(loc='upper right', handles=[p2g_patch, heat_patch, o2_patch, net_patch], bbox_to_anchor=(-0.1, 0.78, 1, 0.1))
-    # plt.show()
-    
-    # bars = np.add(p2g_bar, p2g_heat_bar).tolist()
- 
-    # # The position of the bars on the x-axis
-    # r = [0,1,2]
- 
-    # # Names of group and bar width
-    # names = ['MSP','Emissions','Efficiency']
-    # barWidth = 1
- 
-    # # Create brown bars
-    # plt.bar(r, p2g_bar, color='#7f6d5f', edgecolor='white', width=barWidth)
-    # # Create green bars (middle), on top of the first ones
-    # plt.bar(r, p2g_heat_bar, bottom=p2g_bar, color='#557f2d', edgecolor='white', width=barWidth)
-    # # Create green bars (top)
-    # plt.bar(r, p2g_o2_bar, bottom=bars, color='#2d7f5e', edgecolor='white', width=barWidth)
- 
-    # # Custom X axis
-    # plt.xticks(r, names, fontweight='bold')
-    # plt.xlabel("group")
- 
-    # # Show graphic
-    # plt.show()
-    
-    #Sankey diagram (include efficiencies somehow?) (on annual basis or steady state?)
-    #Flows
-  #   gr_el = process['Elz grid [kWh/h]'].sum()/1000
-  #   pv_el = (process['Elz PV [kWh/h]']+bat_in_pv).sum()/1000
-  #   wi_el = (process['Elz wind [kWh/h]']+bat_in_wind).sum()/1000
-  #   el_bat = sum(bat_in_wind+bat_in_pv)/1000 + 1000
-  #   bat_el = el_bat*bat_eff
-  #   bat_ls= el_bat-bat_el
-  #   el_h2 = process['Elz dispatch [kWh/h]'].sum()/1000
-  #   bg_cm = (biogas_in[0,:].sum()*tec.ch4_mol/1000)
-  #   el_cm = process['Biogas comp [kWh/h]'].sum()/1000
-  #   h2_ch4 = process['H2 used [kg/h]'].sum()*tec.h2_kg/1000
-  #   bg_ls = process['CH4 flared [mol/h]'].sum()*tec.ch4_mol/1000
-  #   cm_ch4 = bg_cm+el_cm
-  #   el_ch4 = process['Meth el [kWh/h]'].sum()/1000
-  #   h2_ht = elz_heat_nonnet.sum()/1000
-  #   ch4_ht = process['Meth heat [kWh/h]'].sum()/1000
-  #   ch4_ch4 = ch4_total
-  #   ht_ww = heat_wwtp.sum()/1000
-  #   ht_ls = h2_ht+ch4_ht-ht_ww
-  #   o2_ww = o2_energy_savings/1000
-  #   o2_ls = o2.aerator_savings * o2_loss * 32 / (1000*1000)
-  #   h2_ls = el_h2-h2_ch4-h2_ht
-  #   ch4_ls = h2_ch4+cm_ch4+el_ch4-ch4_ch4-ch4_ht
-    
-    
-  #   import plotly.io as pio
-  #   pio.renderers.default='browser'
-  #   opacity = 0.4
-  #   fig = go.Figure(data=[go.Sankey(
-  #   node = dict(
-  #     pad = 15,
-  #     thickness = 10,
-  #     line = dict(color = "black", width = 0.5),
-  #     label = ["Grid", "PV", "Wind", "Biogas", "Electricity", "Battery", "Electrolysis", "Compression", "Oxygen", "Methanation", "Heat", "Losses", "WWTP", "Unused heat", "Methane"],
-  #     color = "gray"
-  #   ),
-  #   link = dict(
-  #     source = [0, 1, 2, 4, 5, 5, 4, 3, 4, 6, 7, 4, 6, 9, 9, 10, 10, 8, 8, 3, 6, 9], # indices correspond to labels.
-  #     target = [4, 4, 4, 5, 4, 11, 6, 7, 7, 9, 9, 9, 10, 10, 14, 12, 11, 12, 11, 11, 11, 11],
-  #     value = [gr_el,pv_el,wi_el,el_bat,bat_el,bat_ls,el_h2,bg_cm,el_cm,h2_ch4,cm_ch4,el_ch4,h2_ht,ch4_ht,ch4_ch4,ht_ww,ht_ls,o2_ww,o2_ls,bg_ls,h2_ls,ch4_ls],
-  #     # label =  [],
-  #     color =  ['gold','gold','gold','gold','gold','gold','gold','seagreen','gold','steelblue','seagreen','gold','indianred','indianred','coral','indianred','indianred','purple','purple','seagreen','steelblue','coral']
-  # ))])
-
-  #   fig.update_layout(title_text="P2G energy flows", font_size=10)
-  #   fig.show()
-
-# elif run_type == "optimization":
-    #Include color as a third variable: https://stackoverflow.com/questions/8202605/how-to-color-scatter-markers-as-a-function-of-a-third-variable
-    #For example for increasing renewable share
-    #Could indicate PF only with edge colors and line and not full color to allow for both?
-    
-    # #Determine lowest LCOP2G configuration
-    # min_msp = min(results.iloc[2,:])
-    # index2 = results.columns[results.eq(min_msp).any()]
-
-    # #(Could do a bubble plot to get a third KPI as dot size, but perhaps unnecessarily complex?)
-    # #Pareto front (MSP vs. AEF)
-    # fig, ax1 = plt.subplots()
-    # #Scatter
-    # ax1.plot(results.iloc[2,:], results.iloc[6,:], ls='none', marker='o') #LCOE vs. AEF
-    # #Pareto
-    # sorted_list = sorted([[results.iloc[2,i], results.iloc[6,i]] for i in range(len(results.iloc[2,:]))], reverse=False)
-    # pareto_front = [sorted_list[0]]
-    # for pair in sorted_list[1:]:
-    #     if pair[1] < pareto_front[-1][1]: #could be an issue not to have "<="
-    #                 pareto_front.append(pair)
-    # pf_lcoe = [pair[0] for pair in pareto_front]
-    # pf_aef = [pair[1] for pair in pareto_front]
-    # ax1.plot(pf_lcoe, pf_aef, ls='-', marker='o', color='r')
-
-    # ax1.set_ylabel('Spec. ems (AEF) [kg$_{CO_2}$/MWh$_{CH_4}$]')
-    # ax1.set_xlabel('MSP [€/MWh]')
-    
-    # #Pareto front (MSP vs. MEF)
-    # fig, ax1 = plt.subplots()
-    # #Scatter
-    # ax1.plot(results.iloc[2,:], results.iloc[7,:], ls='none', marker='o') #LCOE vs. AEF
-    # #Pareto
-    # sorted_list = sorted([[results.iloc[2,i], results.iloc[7,i]] for i in range(len(results.iloc[2,:]))], reverse=False)
-    # pareto_front = [sorted_list[0]]
-    # for pair in sorted_list[1:]:
-    #     if pair[1] < pareto_front[-1][1]: #could be an issue not to have "<="
-    #                 pareto_front.append(pair)
-    # pf_lcoe = [pair[0] for pair in pareto_front]
-    # pf_aef = [pair[1] for pair in pareto_front]
-    # ax1.plot(pf_lcoe, pf_aef, ls='-', marker='o', color='r')
-
-    # ax1.set_ylabel('Spec. ems (MEF) [kg$_{CO_2}$/MWh$_{CH_4}$]')
-    # ax1.set_xlabel('MSP [€/MWh]')
-
-    # #Determine lowest LCOP2G configuration
-    # min_lcop2g = min(results.iloc[0,:])
-    # index_min = results.columns[results.eq(min_lcop2g).any()]   
-    # meth_use = 5 #the methanation fraction value used in elz vs. h2st plot
-    # h2st_use = 400 #the hydrogen storage value used in elz vs. meth plot
-    
-    # #2D COLOR PLOTS
-    # #defining vectors
-    # # elz_size_vector = [6,6.5,7,7.5,8,8.5,9,9.5,10,10.5,11,11.5,12] #MW
-    # # meth_scale_vector = [0.6,0.65,0.7,0.75,0.8,0.85,0.9,0.95,1.0,1.05,1.1,1.15,1.2] #ratio to elz
-    # # h2st_size_vector = [0,1,2,3,4,5] #hours
-    # #LCOP2G
-    # #Electrolyzer vs. H2 storage
-    # dx = elz_size_vector[1] - elz_size_vector[0]
-    # dy = h2st_size_vector[1] - h2st_size_vector[0]
-    # y, x = np.mgrid[slice(h2st_size_vector[0], h2st_size_vector[-1] + dy, dy),
-    #                 slice(elz_size_vector[0], elz_size_vector[-1] + dx, dx)]
-    
-    # meth_index = meth_scale_vector.index(meth_use)
-    
-    # fig, (ax1, ax2) = plt.subplots(1,2)
-    # Z = np.zeros([len(h2st_size_vector),len(elz_size_vector)])
-    # for x in range(len(h2st_size_vector)):
-    #     for y in range(len(elz_size_vector)):
-    #         Z[x,y] = results['E: {}, M: {}, S: {}, W: {}, P: {}, B: {}'.format(elz_size_vector[y],meth_scale_vector[meth_index],h2st_size_vector[x],wind_size_vector[0]*elz_size_vector[y],pv_size_vector[0]*elz_size_vector[y],bat_size_vector[0])][0]
-    #         lcop2g_test = results['E: {}, M: {}, S: {}, W: {}, P: {}, B: {}'.format(elz_size_vector[y],meth_scale_vector[meth_index],h2st_size_vector[x],wind_size_vector[0]*elz_size_vector[y],pv_size_vector[0]*elz_size_vector[y],bat_size_vector[0])][0]
-    #         if lcop2g_test == min_lcop2g:
-    #             elz_mini = elz_size_vector[y]
-    #             h2st_mini = h2st_size_vector[x]
-                
-    # levels = np.linspace(190,250,50)
-    # X = elz_size_vector
-    # Y = h2st_size_vector
-    # elz_h2st = ax1.contourf(X, Y, Z, zorder=1, levels=levels)
-    # fig.colorbar(elz_h2st, ticks=[190,200,210,220,230,240,250])
-    # ax1.plot(elz_mini,h2st_mini, color='k', marker='o', zorder=2)
-    # ax1.set_xlabel('Electrolyser [MW$_{el}$]')
-    # ax1.set_ylabel('Hydrogen storage [hours]')
-    # plt.text(0.01,1.02,'(a) Fixed methanation ratio of {}.'.format(meth_use), fontsize=10, transform=ax1.transAxes)
-    
-    # #Electrolyzer vs. methanation reactor
-    # dx = elz_size_vector[1] - elz_size_vector[0]
-    # dy = meth_scale_vector[1] - meth_scale_vector[0]
-    # y, x = np.mgrid[slice(meth_scale_vector[0], meth_scale_vector[-1] + dy, dy),
-    #                 slice(elz_size_vector[0], elz_size_vector[-1] + dx, dx)]
-    
-    # h2st_index = h2st_size_vector.index(h2st_use)
-    # # fig, ax = plt.subplots()
-    # Z = np.zeros([len(meth_scale_vector),len(elz_size_vector)])
-    # for x in range(len(meth_scale_vector)):
-    #     for y in range(len(elz_size_vector)):
-    #         Z[x,y] = results['E: {}, M: {}, S: {}, W: {}, P: {}, B: {}'.format(elz_size_vector[y],meth_scale_vector[x],h2st_size_vector[h2st_index],wind_size_vector[0]*elz_size_vector[y],pv_size_vector[0]*elz_size_vector[y],bat_size_vector[0])][0]
-    #         lcop2g_test = results['E: {}, M: {}, S: {}, W: {}, P: {}, B: {}'.format(elz_size_vector[y],meth_scale_vector[x],h2st_size_vector[h2st_index],wind_size_vector[0]*elz_size_vector[y],pv_size_vector[0]*elz_size_vector[y],bat_size_vector[0])][0]
-    #         if lcop2g_test == min_lcop2g:
-    #             elz_min = elz_size_vector[y]
-    #             meth_min = meth_scale_vector[x]
-                
-    # levels = np.linspace(190,250,50)
-    # X = elz_size_vector
-    # Y = meth_scale_vector
-    # elz_meth = ax2.contourf(X, Y, Z, zorder=1, levels=levels)
-    # fig.colorbar(elz_meth, ticks=[190,200,210,220,230,240,250])
-    # ax2.plot(elz_min,meth_min, color='k', marker='o', zorder=2)
-    # ax2.set_xlabel('Electrolyser [MW$_{el}$]')
-    # ax2.set_ylabel('Methanation ratio [-]')
-    # # ax2.set_title('LCOP2G')
-    # plt.text(0.01,1.02,'(b) Fixed hydrogen storage capacity of {} hours.'.format(h2st_use), fontsize=10, transform=ax2.transAxes)
-    
-    # fig.suptitle('LCOP2G [€/MWh$_{CH_4}$]', fontsize=15)
-    
-    # #GAS LOSSES
-    # meth_use = 5 #the methanation fraction value used in elz vs. h2st plot
-    # h2st_use = 300 #the hydrogen storage value used in elz vs. meth plot
-    # #Electrolyzer vs. H2 storage
-    # dx = elz_size_vector[1] - elz_size_vector[0]
-    # dy = h2st_size_vector[1] - h2st_size_vector[0]
-    # y, x = np.mgrid[slice(h2st_size_vector[0], h2st_size_vector[-1] + dy, dy),
-    #                 slice(elz_size_vector[0], elz_size_vector[-1] + dx, dx)]
-    
-    # meth_index = meth_scale_vector.index(meth_use)
-    
-    # fig, (ax1, ax2) = plt.subplots(1,2)
-    # Z = np.zeros([len(h2st_size_vector),len(elz_size_vector)])
-    # for x in range(len(h2st_size_vector)):
-    #     for y in range(len(elz_size_vector)):
-    #         Z[x,y] = results['E: {}, M: {}, S: {}, W: {}, P: {}, B: {}'.format(elz_size_vector[y],meth_scale_vector[meth_index],h2st_size_vector[x],wind_size_vector[0]*elz_size_vector[y],pv_size_vector[0]*elz_size_vector[y],bat_size_vector[0])][12]
-    #         lcop2g_test = results['E: {}, M: {}, S: {}, W: {}, P: {}, B: {}'.format(elz_size_vector[y],meth_scale_vector[meth_index],h2st_size_vector[x],wind_size_vector[0]*elz_size_vector[y],pv_size_vector[0]*elz_size_vector[y],bat_size_vector[0])][12]
-    #         if lcop2g_test == min_lcop2g:
-    #             elz_mini = elz_size_vector[y]
-    #             h2st_mini = h2st_size_vector[x]
-                
-    # levels = np.linspace(0,18,50)
-    # X = elz_size_vector
-    # Y = h2st_size_vector
-    # elz_h2st = ax1.contourf(X, Y, Z, zorder=1, levels=levels)
-    # fig.colorbar(elz_h2st, ticks=[0,2,4,6,8,10,12,14,16,18])#,20,30])
-    # # ax1.plot(elz_mini,h2st_mini, color='k', marker='o', zorder=2)
-    # ax1.set_xlabel('Electrolyser [MW$_{el}$]')
-    # ax1.set_ylabel('Hydrogen storage [hours]')
-    # plt.text(0.01,1.02,'(a) Fixed methanation ratio of {}.'.format(meth_use), fontsize=10, transform=ax1.transAxes)
-    
-    # #Electrolyzer vs. methanation reactor
-    # dx = elz_size_vector[1] - elz_size_vector[0]
-    # dy = meth_scale_vector[1] - meth_scale_vector[0]
-    # y, x = np.mgrid[slice(meth_scale_vector[0], meth_scale_vector[-1] + dy, dy),
-    #                 slice(elz_size_vector[0], elz_size_vector[-1] + dx, dx)]
-    
-    # h2st_index = h2st_size_vector.index(h2st_use)
-    # Z = np.zeros([len(meth_scale_vector),len(elz_size_vector)])
-    # for x in range(len(meth_scale_vector)):
-    #     for y in range(len(elz_size_vector)):
-    #         Z[x,y] = results['E: {}, M: {}, S: {}, W: {}, P: {}, B: {}'.format(elz_size_vector[y],meth_scale_vector[x],h2st_size_vector[h2st_index],wind_size_vector[0]*elz_size_vector[y],pv_size_vector[0]*elz_size_vector[y],bat_size_vector[0])][12]
-    #         lcop2g_test = results['E: {}, M: {}, S: {}, W: {}, P: {}, B: {}'.format(elz_size_vector[y],meth_scale_vector[x],h2st_size_vector[h2st_index],wind_size_vector[0]*elz_size_vector[y],pv_size_vector[0]*elz_size_vector[y],bat_size_vector[0])][12]
-    #         if lcop2g_test == min_lcop2g:
-    #             elz_min = elz_size_vector[y]
-    #             meth_min = meth_scale_vector[x]
-                
-    # levels = np.linspace(0,18,50)
-    # X = elz_size_vector
-    # Y = meth_scale_vector
-    # elz_meth = ax2.contourf(X, Y, Z, zorder=1, levels=levels)
-    # fig.colorbar(elz_meth, ticks=[0,2,4,6,8,10,12,14,16,18])
-    # # ax2.plot(elz_min,meth_min, color='k', marker='o', zorder=2)
-    # ax2.set_xlabel('Electrolyser [MW$_{el}$]')
-    # ax2.set_ylabel('Methanation ratio [-]')
-    # plt.text(0.01,1.02,'(b) Fixed hydrogen storage capacity of {} hours.'.format(h2st_use), fontsize=10, transform=ax2.transAxes)
-    
-    # fig.suptitle('Gas loss [%]', fontsize=15)
-    
-    # #OTHERS (16/17 for by-product NPV, 3-5 for efficiency)
-    # meth_use = 5 #the methanation fraction value used in elz vs. h2st plot
-    # h2st_use = 300 #the hydrogen storage value used in elz vs. meth plot
-    # #Electrolyzer vs. H2 storage
-    # dx = elz_size_vector[1] - elz_size_vector[0]
-    # dy = h2st_size_vector[1] - h2st_size_vector[0]
-    # y, x = np.mgrid[slice(h2st_size_vector[0], h2st_size_vector[-1] + dy, dy),
-    #                 slice(elz_size_vector[0], elz_size_vector[-1] + dx, dx)]
-    
-    # meth_index = meth_scale_vector.index(meth_use)
-    
-    # fig, (ax1, ax2) = plt.subplots(1,2)
-    # Z = np.zeros([len(h2st_size_vector),len(elz_size_vector)])
-    # for x in range(len(h2st_size_vector)):
-    #     for y in range(len(elz_size_vector)):
-    #         Z[x,y] = results['E: {}, M: {}, S: {}, W: {}, P: {}, B: {}'.format(elz_size_vector[y],meth_scale_vector[meth_index],h2st_size_vector[x],wind_size_vector[0]*elz_size_vector[y],pv_size_vector[0]*elz_size_vector[y],bat_size_vector[0])][6]
-    #         lcop2g_test = results['E: {}, M: {}, S: {}, W: {}, P: {}, B: {}'.format(elz_size_vector[y],meth_scale_vector[meth_index],h2st_size_vector[x],wind_size_vector[0]*elz_size_vector[y],pv_size_vector[0]*elz_size_vector[y],bat_size_vector[0])][6]
-    #         if lcop2g_test == min_lcop2g:
-    #             elz_mini = elz_size_vector[y]
-    #             h2st_mini = h2st_size_vector[x]
-                
-    # # levels = np.linspace(0,5,50)
-    # X = elz_size_vector
-    # Y = h2st_size_vector
-    # elz_h2st = ax1.contourf(X, Y, Z, zorder=1)#, levels=levels)
-    # fig.colorbar(elz_h2st)#, ticks=[0,2,4,6,8,10,12])#,20,30])
-    # # ax1.plot(elz_mini,h2st_mini, color='k', marker='o', zorder=2)
-    # ax1.set_xlabel('Electrolyser [MW$_{el}$]')
-    # ax1.set_ylabel('Hydrogen storage [hours]')
-    # plt.text(0.01,1.02,'(a) Fixed methanation ratio of {}.'.format(meth_use), fontsize=10, transform=ax1.transAxes)
-    
-    # #Electrolyzer vs. methanation reactor
-    # dx = elz_size_vector[1] - elz_size_vector[0]
-    # dy = meth_scale_vector[1] - meth_scale_vector[0]
-    # y, x = np.mgrid[slice(meth_scale_vector[0], meth_scale_vector[-1] + dy, dy),
-    #                 slice(elz_size_vector[0], elz_size_vector[-1] + dx, dx)]
-    
-    # h2st_index = h2st_size_vector.index(h2st_use)
-    # Z = np.zeros([len(meth_scale_vector),len(elz_size_vector)])
-    # for x in range(len(meth_scale_vector)):
-    #     for y in range(len(elz_size_vector)):
-    #         Z[x,y] = results['E: {}, M: {}, S: {}, W: {}, P: {}, B: {}'.format(elz_size_vector[y],meth_scale_vector[x],h2st_size_vector[h2st_index],wind_size_vector[0]*elz_size_vector[y],pv_size_vector[0]*elz_size_vector[y],bat_size_vector[0])][6]
-    #         lcop2g_test = results['E: {}, M: {}, S: {}, W: {}, P: {}, B: {}'.format(elz_size_vector[y],meth_scale_vector[x],h2st_size_vector[h2st_index],wind_size_vector[0]*elz_size_vector[y],pv_size_vector[0]*elz_size_vector[y],bat_size_vector[0])][6]
-    #         if lcop2g_test == min_lcop2g:
-    #             elz_min = elz_size_vector[y]
-    #             meth_min = meth_scale_vector[x]
-                
-    # # levels = np.linspace(0,2,50)
-    # X = elz_size_vector
-    # Y = meth_scale_vector
-    # elz_meth = ax2.contourf(X, Y, Z, zorder=1)#, levels=levels)
-    # fig.colorbar(elz_meth)#, ticks=[0,10,20,30,40,50])
-    # # ax2.plot(elz_min,meth_min, color='k', marker='o', zorder=2)
-    # ax2.set_xlabel('Electrolyser [MW$_{el}$]')
-    # ax2.set_ylabel('Methanation ratio [-]')
-    # plt.text(0.01,1.02,'(b) Fixed hydrogen storage capacity of {} hours.'.format(h2st_use), fontsize=10, transform=ax2.transAxes)
-    
-    # fig.suptitle('System efficiency [%]', fontsize=15)
-    
-    
-    
-    
-    
-    
-    
-    
-    
+    # end = time.time()
+    # total_time = end - start
+    # print('Time: ' + str(total_time))
